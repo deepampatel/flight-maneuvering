@@ -244,3 +244,116 @@ body {
 .legend-dot.interceptor {
   background: #3b82f6;
 }
+
+/* Guidance selection */
+.guidance-select {
+  width: 100%;
+  padding: 0.5rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  color: #e2e8f0;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.guidance-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nav-constant-control {
+  margin-top: 0.5rem;
+}
+
+.nav-constant-control label {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+.nav-constant-control input[type="range"] {
+  width: 100%;
+  accent-color: #3b82f6;
+}
+
+/* Monte Carlo section */
+.toggle-btn {
+  float: right;
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  font-family: monospace;
+}
+
+.toggle-btn:hover {
+  color: #94a3b8;
+}
+
+.monte-carlo-section {
+  margin-top: 0.5rem;
+}
+
+.mc-description {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin: 0 0 0.5rem 0;
+}
+
+.mc-results {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.mc-results h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+/* Histogram */
+.histogram {
+  margin-top: 0.75rem;
+}
+
+.histogram h4 {
+  margin-bottom: 0.5rem;
+}
+
+.histogram-bars {
+  display: flex;
+  align-items: flex-end;
+  height: 60px;
+  gap: 2px;
+  background: #1e293b;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.histogram-bar {
+  flex: 1;
+  background: #3b82f6;
+  border-radius: 2px;
+  min-height: 2px;
+  transition: height 0.2s;
+}
+
+.histogram-bar:hover {
+  background: #60a5fa;
+}
+
+.histogram-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}

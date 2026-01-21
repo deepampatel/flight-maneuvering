@@ -24,6 +24,8 @@ from pydantic import BaseModel
 
 from sim.engine import SimEngine, SimConfig, load_scenario, SCENARIOS
 from sim.vector import Vec3
+from sim.guidance import GuidanceType, GuidanceParams, create_guidance_function
+from sim.monte_carlo import MonteCarloConfig, run_monte_carlo, parameter_sweep
 
 
 # ============================================================
@@ -87,6 +89,29 @@ class RunConfig(BaseModel):
     dt: float = 0.02
     max_time: float = 60.0
     kill_radius: float = 150.0  # Proximity fuse radius
+    guidance: str = "proportional_nav"  # pure_pursuit, proportional_nav, augmented_pn
+    nav_constant: float = 4.0
+
+
+class MonteCarloRequest(BaseModel):
+    """Request body for Monte Carlo batch run."""
+    scenario: str = "head_on"
+    guidance: str = "proportional_nav"
+    nav_constant: float = 4.0
+    num_runs: int = 100
+    kill_radius: float = 50.0
+    position_noise_std: float = 0.0
+    velocity_noise_std: float = 0.0
+
+
+class ParameterSweepRequest(BaseModel):
+    """Request body for parameter sweep."""
+    scenario: str = "head_on"
+    guidance: str = "proportional_nav"
+    param_name: str = "nav_constant"  # nav_constant, kill_radius, position_noise_std
+    param_values: list = [2.0, 3.0, 4.0, 5.0, 6.0]
+    num_runs_per_value: int = 50
+    kill_radius: float = 50.0
 
 
 class RunStatus(BaseModel):
@@ -179,6 +204,11 @@ async def start_run(config: RunConfig):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Create guidance function
+    guidance_type = GuidanceType(config.guidance)
+    guidance_params = GuidanceParams(nav_constant=config.nav_constant)
+    guidance = create_guidance_function(guidance_type, guidance_params)
+
     # Create engine with config
     sim_config = SimConfig(
         dt=config.dt,
@@ -186,7 +216,7 @@ async def start_run(config: RunConfig):
         kill_radius=config.kill_radius,
         real_time=config.real_time,
     )
-    current_engine = SimEngine(config=sim_config)
+    current_engine = SimEngine(config=sim_config, guidance=guidance)
 
     # Register broadcast handler
     current_engine.on_event(manager.broadcast)
@@ -236,6 +266,85 @@ async def stop_run():
         return {"status": "stopped"}
 
     return {"status": "no_run_active"}
+
+
+# ============================================================
+# Monte Carlo Endpoints
+# ============================================================
+
+@app.get("/guidance")
+async def list_guidance():
+    """List available guidance laws."""
+    return {
+        "guidance_laws": [
+            {"id": "pure_pursuit", "name": "Pure Pursuit", "description": "Point at target's current position"},
+            {"id": "proportional_nav", "name": "Proportional Navigation", "description": "Industry standard - drives LOS rate to zero"},
+            {"id": "augmented_pn", "name": "Augmented PN", "description": "PN with target acceleration compensation"},
+        ]
+    }
+
+
+@app.post("/monte-carlo")
+async def run_monte_carlo_batch(request: MonteCarloRequest):
+    """
+    Run a Monte Carlo batch analysis.
+
+    Returns statistics on intercept success rate, miss distance distribution, etc.
+    """
+    try:
+        scenario = load_scenario(request.scenario)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    config = MonteCarloConfig(
+        target_start=scenario["target_start"],
+        target_velocity=scenario["target_velocity"],
+        interceptor_start=scenario["interceptor_start"],
+        interceptor_velocity=scenario["interceptor_velocity"],
+        guidance_type=GuidanceType(request.guidance),
+        nav_constant=request.nav_constant,
+        num_runs=min(request.num_runs, 1000),  # Cap at 1000
+        kill_radius=request.kill_radius,
+        position_noise_std=request.position_noise_std,
+        velocity_noise_std=request.velocity_noise_std,
+    )
+
+    results = await run_monte_carlo(config)
+    return results.to_dict()
+
+
+@app.post("/monte-carlo/sweep")
+async def run_parameter_sweep_endpoint(request: ParameterSweepRequest):
+    """
+    Run a parameter sweep analysis.
+
+    Varies one parameter across multiple values to find optimal settings.
+    """
+    try:
+        scenario = load_scenario(request.scenario)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    base_config = MonteCarloConfig(
+        target_start=scenario["target_start"],
+        target_velocity=scenario["target_velocity"],
+        interceptor_start=scenario["interceptor_start"],
+        interceptor_velocity=scenario["interceptor_velocity"],
+        guidance_type=GuidanceType(request.guidance),
+        num_runs=min(request.num_runs_per_value, 200),  # Cap per value
+        kill_radius=request.kill_radius,
+    )
+
+    results = await parameter_sweep(
+        base_config,
+        request.param_name,
+        request.param_values,
+    )
+
+    return {
+        "param_name": request.param_name,
+        "results": [r.to_dict() for r in results],
+    }
 
 
 # ============================================================

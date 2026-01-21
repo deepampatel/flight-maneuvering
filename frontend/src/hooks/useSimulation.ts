@@ -12,34 +12,75 @@
  * - Connection status
  * - Latest simulation state
  * - Methods to start/stop runs
+ * - Monte Carlo analysis
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { SimStateEvent, SimEvent, Scenario } from '../types';
+import type {
+  SimStateEvent,
+  SimEvent,
+  Scenario,
+  GuidanceLaw,
+  MonteCarloResults,
+  ParameterSweepResults,
+} from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
 const API_URL = 'http://localhost:8000';
+
+interface RunOptions {
+  scenario: string;
+  guidance: string;
+  navConstant: number;
+}
+
+interface MonteCarloOptions {
+  scenario: string;
+  guidance: string;
+  navConstant: number;
+  numRuns: number;
+  killRadius: number;
+  positionNoiseStd: number;
+  velocityNoiseStd: number;
+}
 
 interface UseSimulationReturn {
   connected: boolean;
   state: SimStateEvent | null;
   scenarios: Record<string, Scenario>;
-  startRun: (scenario: string) => Promise<void>;
+  guidanceLaws: GuidanceLaw[];
+  startRun: (options: RunOptions) => Promise<void>;
   stopRun: () => Promise<void>;
+  runMonteCarlo: (options: MonteCarloOptions) => Promise<MonteCarloResults>;
+  runParameterSweep: (
+    scenario: string,
+    guidance: string,
+    paramName: string,
+    paramValues: number[],
+    numRunsPerValue: number
+  ) => Promise<ParameterSweepResults>;
+  monteCarloLoading: boolean;
 }
 
 export function useSimulation(): UseSimulationReturn {
   const [connected, setConnected] = useState(false);
   const [state, setState] = useState<SimStateEvent | null>(null);
   const [scenarios, setScenarios] = useState<Record<string, Scenario>>({});
+  const [guidanceLaws, setGuidanceLaws] = useState<GuidanceLaw[]>([]);
+  const [monteCarloLoading, setMonteCarloLoading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number>();
 
-  // Fetch available scenarios on mount
+  // Fetch available scenarios and guidance laws on mount
   useEffect(() => {
     fetch(`${API_URL}/scenarios`)
       .then((res) => res.json())
       .then(setScenarios)
+      .catch(console.error);
+
+    fetch(`${API_URL}/guidance`)
+      .then((res) => res.json())
+      .then((data) => setGuidanceLaws(data.guidance_laws))
       .catch(console.error);
   }, []);
 
@@ -102,13 +143,18 @@ export function useSimulation(): UseSimulationReturn {
   }, [connect]);
 
   // Start a new simulation run
-  const startRun = useCallback(async (scenario: string) => {
+  const startRun = useCallback(async (options: RunOptions) => {
     setState(null); // Clear previous state
 
     const response = await fetch(`${API_URL}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario, real_time: true }),
+      body: JSON.stringify({
+        scenario: options.scenario,
+        guidance: options.guidance,
+        nav_constant: options.navConstant,
+        real_time: true,
+      }),
     });
 
     if (!response.ok) {
@@ -124,11 +170,81 @@ export function useSimulation(): UseSimulationReturn {
     await fetch(`${API_URL}/runs/stop`, { method: 'POST' });
   }, []);
 
+  // Run Monte Carlo analysis
+  const runMonteCarlo = useCallback(
+    async (options: MonteCarloOptions): Promise<MonteCarloResults> => {
+      setMonteCarloLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/monte-carlo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scenario: options.scenario,
+            guidance: options.guidance,
+            nav_constant: options.navConstant,
+            num_runs: options.numRuns,
+            kill_radius: options.killRadius,
+            position_noise_std: options.positionNoiseStd,
+            velocity_noise_std: options.velocityNoiseStd,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Monte Carlo failed: ${response.statusText}`);
+        }
+
+        return await response.json();
+      } finally {
+        setMonteCarloLoading(false);
+      }
+    },
+    []
+  );
+
+  // Run parameter sweep
+  const runParameterSweep = useCallback(
+    async (
+      scenario: string,
+      guidance: string,
+      paramName: string,
+      paramValues: number[],
+      numRunsPerValue: number
+    ): Promise<ParameterSweepResults> => {
+      setMonteCarloLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/monte-carlo/sweep`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scenario,
+            guidance,
+            param_name: paramName,
+            param_values: paramValues,
+            num_runs_per_value: numRunsPerValue,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Parameter sweep failed: ${response.statusText}`);
+        }
+
+        return await response.json();
+      } finally {
+        setMonteCarloLoading(false);
+      }
+    },
+    []
+  );
+
   return {
     connected,
     state,
     scenarios,
+    guidanceLaws,
     startRun,
     stopRun,
+    runMonteCarlo,
+    runParameterSweep,
+    monteCarloLoading,
   };
 }

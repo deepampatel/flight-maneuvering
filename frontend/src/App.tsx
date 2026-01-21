@@ -12,13 +12,22 @@ import { useSimulation } from './hooks/useSimulation';
 import './App.css';
 
 function App() {
-  const { connected, state, scenarios, startRun, stopRun } = useSimulation();
+  const {
+    connected,
+    state,
+    scenarios,
+    guidanceLaws,
+    startRun,
+    stopRun,
+    runMonteCarlo,
+    monteCarloLoading,
+  } = useSimulation();
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>Air Dominance Simulation</h1>
-        <span className="subtitle">Phase 1: Foundation</span>
+        <span className="subtitle">Phase 2: Proportional Navigation + Monte Carlo</span>
       </header>
 
       <main className="app-main">
@@ -30,8 +39,11 @@ function App() {
           connected={connected}
           state={state}
           scenarios={scenarios}
+          guidanceLaws={guidanceLaws}
           onStart={startRun}
           onStop={stopRun}
+          onRunMonteCarlo={runMonteCarlo}
+          monteCarloLoading={monteCarloLoading}
         />
       </main>
     </div>
