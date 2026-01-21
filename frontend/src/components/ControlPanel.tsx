@@ -3,21 +3,31 @@
  *
  * This provides:
  * 1. Scenario selection
- * 2. Guidance law selection (NEW in Phase 2)
- * 3. Start/Stop controls
- * 4. Real-time telemetry display
- * 5. Monte Carlo analysis controls (NEW in Phase 2)
+ * 2. Guidance law selection
+ * 3. Evasion maneuver selection (NEW in Phase 3)
+ * 4. Multiple interceptor controls (NEW in Phase 3)
+ * 5. Start/Stop controls
+ * 6. Real-time telemetry display
+ * 7. Monte Carlo analysis controls
+ * 8. Engagement envelope analysis (NEW in Phase 3)
  */
 
 import { useState } from 'react';
-import type { SimStateEvent, Scenario, GuidanceLaw, MonteCarloResults } from '../types';
+import type { SimStateEvent, Scenario, GuidanceLaw, EvasionType, MonteCarloResults, EnvelopeResults } from '../types';
 
 interface ControlPanelProps {
   connected: boolean;
   state: SimStateEvent | null;
   scenarios: Record<string, Scenario>;
   guidanceLaws: GuidanceLaw[];
-  onStart: (options: { scenario: string; guidance: string; navConstant: number }) => void;
+  evasionTypes: EvasionType[];
+  onStart: (options: {
+    scenario: string;
+    guidance: string;
+    navConstant: number;
+    evasion: string;
+    numInterceptors: number;
+  }) => void;
   onStop: () => void;
   onRunMonteCarlo: (options: {
     scenario: string;
@@ -28,7 +38,16 @@ interface ControlPanelProps {
     positionNoiseStd: number;
     velocityNoiseStd: number;
   }) => Promise<MonteCarloResults>;
+  onRunEnvelope: (config: {
+    guidance: string;
+    nav_constant: number;
+    evasion: string;
+    range_steps: number;
+    bearing_steps: number;
+    runs_per_point: number;
+  }) => Promise<EnvelopeResults>;
   monteCarloLoading: boolean;
+  envelopeLoading: boolean;
 }
 
 export function ControlPanel({
@@ -36,23 +55,36 @@ export function ControlPanel({
   state,
   scenarios,
   guidanceLaws,
+  evasionTypes,
   onStart,
   onStop,
   onRunMonteCarlo,
+  onRunEnvelope,
   monteCarloLoading,
+  envelopeLoading,
 }: ControlPanelProps) {
   const [selectedGuidance, setSelectedGuidance] = useState('proportional_nav');
   const [navConstant, setNavConstant] = useState(4.0);
+  const [selectedEvasion, setSelectedEvasion] = useState('none');
+  const [numInterceptors, setNumInterceptors] = useState(1);
   const [mcResults, setMcResults] = useState<MonteCarloResults | null>(null);
+  const [envelopeResults, setEnvelopeResults] = useState<EnvelopeResults | null>(null);
   const [showMonteCarlo, setShowMonteCarlo] = useState(false);
+  const [showEnvelope, setShowEnvelope] = useState(false);
 
   const isRunning = state?.status === 'running';
 
   const target = state?.entities.find((e) => e.type === 'target');
-  const interceptor = state?.entities.find((e) => e.type === 'interceptor');
+  const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
   const handleStart = (scenario: string) => {
-    onStart({ scenario, guidance: selectedGuidance, navConstant });
+    onStart({
+      scenario,
+      guidance: selectedGuidance,
+      navConstant,
+      evasion: selectedEvasion,
+      numInterceptors,
+    });
   };
 
   const handleRunMonteCarlo = async (scenario: string) => {
@@ -66,6 +98,18 @@ export function ControlPanel({
       velocityNoiseStd: 5,
     });
     setMcResults(results);
+  };
+
+  const handleRunEnvelope = async () => {
+    const results = await onRunEnvelope({
+      guidance: selectedGuidance,
+      nav_constant: navConstant,
+      evasion: selectedEvasion,
+      range_steps: 8,
+      bearing_steps: 10,
+      runs_per_point: 5,
+    });
+    setEnvelopeResults(results);
   };
 
   return (
@@ -108,6 +152,37 @@ export function ControlPanel({
             />
           </div>
         )}
+      </div>
+
+      {/* Evasion Selection */}
+      <div className="controls-section">
+        <h3>Target Evasion</h3>
+        <select
+          value={selectedEvasion}
+          onChange={(e) => setSelectedEvasion(e.target.value)}
+          disabled={isRunning}
+          className="evasion-select"
+        >
+          {evasionTypes.map((e) => (
+            <option key={e.id} value={e.id} title={e.description}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Interceptor Count */}
+      <div className="controls-section">
+        <h3>Interceptors: {numInterceptors}</h3>
+        <input
+          type="range"
+          min="1"
+          max="8"
+          step="1"
+          value={numInterceptors}
+          onChange={(e) => setNumInterceptors(parseInt(e.target.value))}
+          disabled={isRunning}
+        />
       </div>
 
       {/* Scenario Selection & Controls */}
@@ -188,9 +263,10 @@ export function ControlPanel({
         </div>
       )}
 
-      {interceptor && (
-        <div className="telemetry-section">
-          <h3>Interceptor (I1)</h3>
+      {/* Interceptor Telemetry - show all interceptors */}
+      {interceptors.map((interceptor) => (
+        <div key={interceptor.id} className="telemetry-section">
+          <h3>Interceptor ({interceptor.id})</h3>
           <div className="telemetry-grid">
             <div className="telemetry-item">
               <label>Position</label>
@@ -216,7 +292,7 @@ export function ControlPanel({
             </div>
           </div>
         </div>
-      )}
+      ))}
 
       {/* Monte Carlo Section */}
       <div className="telemetry-section">
@@ -302,6 +378,67 @@ export function ControlPanel({
         )}
       </div>
 
+      {/* Engagement Envelope Section */}
+      <div className="telemetry-section">
+        <h3>
+          Engagement Envelope
+          <button
+            className="toggle-btn"
+            onClick={() => setShowEnvelope(!showEnvelope)}
+          >
+            {showEnvelope ? '[-]' : '[+]'}
+          </button>
+        </h3>
+
+        {showEnvelope && (
+          <div className="envelope-section">
+            <p className="mc-description">
+              Compute intercept probability across range and bearing
+            </p>
+            <button
+              onClick={handleRunEnvelope}
+              disabled={envelopeLoading}
+              className="envelope-btn"
+            >
+              {envelopeLoading ? 'Computing...' : 'Compute Envelope'}
+            </button>
+
+            {envelopeResults && (
+              <div className="envelope-results">
+                <h4>Envelope Heatmap</h4>
+                <div className="heatmap-container">
+                  {envelopeResults.heatmap_2d.data.map((row, ri) => (
+                    <div key={ri} className="heatmap-row">
+                      {row.map((value, ci) => {
+                        const hue = value * 120; // 0=red, 120=green
+                        return (
+                          <div
+                            key={ci}
+                            className="heatmap-cell"
+                            style={{
+                              backgroundColor: `hsl(${hue}, 80%, 40%)`,
+                            }}
+                            title={`Range: ${envelopeResults.range_values[ri].toFixed(0)}m, Bearing: ${envelopeResults.bearing_values[ci].toFixed(0)}deg, Pk: ${(value * 100).toFixed(0)}%`}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+                <div className="heatmap-legend">
+                  <span>0%</span>
+                  <div className="heatmap-gradient" />
+                  <span>100%</span>
+                </div>
+                <div className="heatmap-labels">
+                  <span>Bearing: {envelopeResults.bearing_values[0].toFixed(0)} to {envelopeResults.bearing_values[envelopeResults.bearing_values.length - 1].toFixed(0)} deg</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Instructions */}
       <div className="instructions">
         <h4>Controls</h4>
@@ -316,7 +453,7 @@ export function ControlPanel({
             <span className="legend-dot target" /> Target
           </li>
           <li>
-            <span className="legend-dot interceptor" /> Interceptor
+            <span className="legend-dot interceptor" /> Interceptors
           </li>
           <li>Grid: 1 square = 1km</li>
         </ul>

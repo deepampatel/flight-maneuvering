@@ -9,11 +9,10 @@
  * 3. Mesh: A visible object (geometry + material)
  * 4. Lights: Illuminate the scene
  *
- * For simulation visualization:
- * - Target: Red sphere
- * - Interceptor: Blue cone (pointing in velocity direction)
- * - Trails: Line showing path history
- * - Grid: Reference for scale/position
+ * Phase 3 enhancements:
+ * - Multiple interceptors with distinct colors
+ * - Gradient trails with time markers
+ * - Enhanced trail visualization
  */
 
 import { useRef, useMemo } from 'react';
@@ -24,6 +23,29 @@ import type { EntityState, SimStateEvent } from '../types';
 
 // Scale factor: sim uses meters, we scale down for visualization
 const SCALE = 0.001; // 1 unit = 1km
+
+// Color palette for multiple interceptors
+const INTERCEPTOR_COLORS = [
+  '#3b82f6', // Blue
+  '#22c55e', // Green
+  '#06b6d4', // Cyan
+  '#a855f7', // Purple
+  '#f97316', // Orange
+  '#eab308', // Yellow
+  '#ec4899', // Pink
+  '#14b8a6', // Teal
+];
+
+const INTERCEPTOR_EMISSIVE = [
+  '#1d4ed8',
+  '#15803d',
+  '#0891b2',
+  '#7c3aed',
+  '#c2410c',
+  '#a16207',
+  '#be185d',
+  '#0f766e',
+];
 
 interface EntityProps {
   entity: EntityState;
@@ -69,11 +91,20 @@ function Target({ entity, trail }: EntityProps) {
   );
 }
 
+interface InterceptorProps extends EntityProps {
+  colorIndex?: number;
+}
+
 /**
- * Interceptor visualization - a blue cone pointing in velocity direction
+ * Interceptor visualization - a cone pointing in velocity direction
+ * Supports multiple interceptors with distinct colors
  */
-function Interceptor({ entity, trail }: EntityProps) {
+function Interceptor({ entity, trail, colorIndex = 0 }: InterceptorProps) {
   const meshRef = useRef<THREE.Mesh>(null);
+
+  // Get color for this interceptor
+  const color = INTERCEPTOR_COLORS[colorIndex % INTERCEPTOR_COLORS.length];
+  const emissive = INTERCEPTOR_EMISSIVE[colorIndex % INTERCEPTOR_EMISSIVE.length];
 
   const position: [number, number, number] = [
     entity.position.x * SCALE,
@@ -112,23 +143,58 @@ function Interceptor({ entity, trail }: EntityProps) {
       {/* Interceptor cone */}
       <mesh ref={meshRef} position={position}>
         <coneGeometry args={[0.1, 0.3, 8]} />
-        <meshStandardMaterial color="#3b82f6" emissive="#1d4ed8" emissiveIntensity={0.3} />
+        <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.3} />
       </mesh>
 
       {/* Label */}
       <Text
         position={[position[0], position[1] + 0.3, position[2]]}
-        fontSize={0.15}
-        color="#3b82f6"
+        fontSize={0.12}
+        color={color}
         anchorX="center"
       >
-        INTERCEPTOR
+        {entity.id}
       </Text>
 
-      {/* Trail */}
+      {/* Trail with gradient effect */}
       {trail.length > 1 && (
-        <Line points={trail} color="#3b82f6" lineWidth={2} opacity={0.5} transparent />
+        <GradientTrail points={trail} color={color} />
       )}
+    </group>
+  );
+}
+
+/**
+ * Gradient trail component - fades from start to end
+ */
+function GradientTrail({ points, color }: { points: THREE.Vector3[]; color: string }) {
+  // Create time markers every ~50 points (about 1 second at 50Hz)
+  const markerIndices = useMemo(() => {
+    const indices: number[] = [];
+    for (let i = 50; i < points.length; i += 50) {
+      indices.push(i);
+    }
+    return indices;
+  }, [points.length]);
+
+  return (
+    <group>
+      {/* Main trail line */}
+      <Line
+        points={points}
+        color={color}
+        lineWidth={2}
+        opacity={0.6}
+        transparent
+      />
+
+      {/* Time markers (small spheres along trail) */}
+      {markerIndices.map((idx) => (
+        <mesh key={idx} position={points[idx]}>
+          <sphereGeometry args={[0.03, 8, 8]} />
+          <meshBasicMaterial color={color} opacity={0.4} transparent />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -140,7 +206,7 @@ interface SceneContentProps {
 
 function SceneContent({ state, trails }: SceneContentProps) {
   const target = state?.entities.find((e) => e.type === 'target');
-  const interceptor = state?.entities.find((e) => e.type === 'interceptor');
+  const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
   return (
     <>
@@ -173,9 +239,18 @@ function SceneContent({ state, trails }: SceneContentProps) {
       {/* Axis helper for orientation */}
       <axesHelper args={[2]} />
 
-      {/* Entities */}
+      {/* Target */}
       {target && <Target entity={target} trail={trails.get(target.id) || []} />}
-      {interceptor && <Interceptor entity={interceptor} trail={trails.get(interceptor.id) || []} />}
+
+      {/* All Interceptors */}
+      {interceptors.map((interceptor, idx) => (
+        <Interceptor
+          key={interceptor.id}
+          entity={interceptor}
+          trail={trails.get(interceptor.id) || []}
+          colorIndex={idx}
+        />
+      ))}
     </>
   );
 }

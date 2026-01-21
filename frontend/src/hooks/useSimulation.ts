@@ -21,8 +21,11 @@ import type {
   SimEvent,
   Scenario,
   GuidanceLaw,
+  EvasionType,
   MonteCarloResults,
   ParameterSweepResults,
+  EnvelopeConfig,
+  EnvelopeResults,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -32,6 +35,8 @@ interface RunOptions {
   scenario: string;
   guidance: string;
   navConstant: number;
+  evasion?: string;
+  numInterceptors?: number;
 }
 
 interface MonteCarloOptions {
@@ -49,6 +54,7 @@ interface UseSimulationReturn {
   state: SimStateEvent | null;
   scenarios: Record<string, Scenario>;
   guidanceLaws: GuidanceLaw[];
+  evasionTypes: EvasionType[];
   startRun: (options: RunOptions) => Promise<void>;
   stopRun: () => Promise<void>;
   runMonteCarlo: (options: MonteCarloOptions) => Promise<MonteCarloResults>;
@@ -59,7 +65,9 @@ interface UseSimulationReturn {
     paramValues: number[],
     numRunsPerValue: number
   ) => Promise<ParameterSweepResults>;
+  runEnvelopeAnalysis: (config: Partial<EnvelopeConfig>) => Promise<EnvelopeResults>;
   monteCarloLoading: boolean;
+  envelopeLoading: boolean;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -67,11 +75,13 @@ export function useSimulation(): UseSimulationReturn {
   const [state, setState] = useState<SimStateEvent | null>(null);
   const [scenarios, setScenarios] = useState<Record<string, Scenario>>({});
   const [guidanceLaws, setGuidanceLaws] = useState<GuidanceLaw[]>([]);
+  const [evasionTypes, setEvasionTypes] = useState<EvasionType[]>([]);
   const [monteCarloLoading, setMonteCarloLoading] = useState(false);
+  const [envelopeLoading, setEnvelopeLoading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number>();
 
-  // Fetch available scenarios and guidance laws on mount
+  // Fetch available scenarios, guidance laws, and evasion types on mount
   useEffect(() => {
     fetch(`${API_URL}/scenarios`)
       .then((res) => res.json())
@@ -81,6 +91,11 @@ export function useSimulation(): UseSimulationReturn {
     fetch(`${API_URL}/guidance`)
       .then((res) => res.json())
       .then((data) => setGuidanceLaws(data.guidance_laws))
+      .catch(console.error);
+
+    fetch(`${API_URL}/evasion`)
+      .then((res) => res.json())
+      .then((data) => setEvasionTypes(data.evasion_types))
       .catch(console.error);
   }, []);
 
@@ -153,6 +168,8 @@ export function useSimulation(): UseSimulationReturn {
         scenario: options.scenario,
         guidance: options.guidance,
         nav_constant: options.navConstant,
+        evasion: options.evasion || 'none',
+        num_interceptors: options.numInterceptors || 1,
         real_time: true,
       }),
     });
@@ -236,15 +253,41 @@ export function useSimulation(): UseSimulationReturn {
     []
   );
 
+  // Run engagement envelope analysis
+  const runEnvelopeAnalysis = useCallback(
+    async (config: Partial<EnvelopeConfig>): Promise<EnvelopeResults> => {
+      setEnvelopeLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/envelope`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Envelope analysis failed: ${response.statusText}`);
+        }
+
+        return await response.json();
+      } finally {
+        setEnvelopeLoading(false);
+      }
+    },
+    []
+  );
+
   return {
     connected,
     state,
     scenarios,
     guidanceLaws,
+    evasionTypes,
     startRun,
     stopRun,
     runMonteCarlo,
     runParameterSweep,
+    runEnvelopeAnalysis,
     monteCarloLoading,
+    envelopeLoading,
   };
 }

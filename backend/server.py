@@ -26,6 +26,8 @@ from sim.engine import SimEngine, SimConfig, load_scenario, SCENARIOS
 from sim.vector import Vec3
 from sim.guidance import GuidanceType, GuidanceParams, create_guidance_function
 from sim.monte_carlo import MonteCarloConfig, run_monte_carlo, parameter_sweep
+from sim.evasion import EvasionType, EvasionConfig
+from sim.envelope import EnvelopeConfig, compute_engagement_envelope
 
 
 # ============================================================
@@ -91,6 +93,8 @@ class RunConfig(BaseModel):
     kill_radius: float = 150.0  # Proximity fuse radius
     guidance: str = "proportional_nav"  # pure_pursuit, proportional_nav, augmented_pn
     nav_constant: float = 4.0
+    evasion: str = "none"  # none, constant_turn, weave, barrel_roll, random_jink
+    num_interceptors: int = 1  # Number of interceptors (unlimited)
 
 
 class MonteCarloRequest(BaseModel):
@@ -112,6 +116,39 @@ class ParameterSweepRequest(BaseModel):
     param_values: list = [2.0, 3.0, 4.0, 5.0, 6.0]
     num_runs_per_value: int = 50
     kill_radius: float = 50.0
+
+
+class EnvelopeRequest(BaseModel):
+    """Request body for engagement envelope analysis."""
+    # Range sweep (meters)
+    range_min: float = 1000.0
+    range_max: float = 5000.0
+    range_steps: int = 8
+
+    # Bearing sweep (degrees)
+    bearing_min: float = -90.0
+    bearing_max: float = 90.0
+    bearing_steps: int = 10
+
+    # Elevation sweep (degrees)
+    elevation_min: float = -20.0
+    elevation_max: float = 20.0
+    elevation_steps: int = 5
+
+    # Monte Carlo settings
+    runs_per_point: int = 5
+
+    # Guidance settings
+    guidance: str = "proportional_nav"
+    nav_constant: float = 4.0
+    kill_radius: float = 50.0
+
+    # Target settings
+    target_speed: float = 100.0
+    evasion: str = "none"
+
+    # Interceptor settings
+    interceptor_speed: float = 200.0
 
 
 class RunStatus(BaseModel):
@@ -172,8 +209,26 @@ async def root():
 async def list_scenarios():
     """List available scenarios."""
     return {
-        name: {"name": name, "description": info["description"]}
+        name: {
+            "name": name,
+            "description": info["description"],
+            "evasion": info.get("evasion", "none").value if hasattr(info.get("evasion", "none"), "value") else "none",
+        }
         for name, info in SCENARIOS.items()
+    }
+
+
+@app.get("/evasion")
+async def list_evasion_types():
+    """List available evasion maneuvers."""
+    return {
+        "evasion_types": [
+            {"id": "none", "name": "None", "description": "Target flies straight, no evasion"},
+            {"id": "constant_turn", "name": "Constant Turn", "description": "Sustained turn at fixed rate"},
+            {"id": "weave", "name": "Weave (S-Turns)", "description": "Periodic direction reversals"},
+            {"id": "barrel_roll", "name": "Barrel Roll", "description": "3D spiral evasion maneuver"},
+            {"id": "random_jink", "name": "Random Jink", "description": "Unpredictable random direction changes"},
+        ]
     }
 
 
@@ -209,6 +264,14 @@ async def start_run(config: RunConfig):
     guidance_params = GuidanceParams(nav_constant=config.nav_constant)
     guidance = create_guidance_function(guidance_type, guidance_params)
 
+    # Determine evasion type (from config or scenario default)
+    if config.evasion != "none":
+        evasion_type = EvasionType(config.evasion)
+    elif "evasion" in scenario:
+        evasion_type = scenario["evasion"]
+    else:
+        evasion_type = EvasionType.NONE
+
     # Create engine with config
     sim_config = SimConfig(
         dt=config.dt,
@@ -216,7 +279,11 @@ async def start_run(config: RunConfig):
         kill_radius=config.kill_radius,
         real_time=config.real_time,
     )
-    current_engine = SimEngine(config=sim_config, guidance=guidance)
+    current_engine = SimEngine(
+        config=sim_config,
+        guidance=guidance,
+        evasion_type=evasion_type,
+    )
 
     # Register broadcast handler
     current_engine.on_event(manager.broadcast)
@@ -227,6 +294,7 @@ async def start_run(config: RunConfig):
         target_velocity=scenario["target_velocity"],
         interceptor_start=scenario["interceptor_start"],
         interceptor_velocity=scenario["interceptor_velocity"],
+        num_interceptors=config.num_interceptors,
     )
 
     # Start simulation in background
@@ -345,6 +413,37 @@ async def run_parameter_sweep_endpoint(request: ParameterSweepRequest):
         "param_name": request.param_name,
         "results": [r.to_dict() for r in results],
     }
+
+
+@app.post("/envelope")
+async def run_envelope_analysis(request: EnvelopeRequest):
+    """
+    Compute engagement envelope.
+
+    Sweeps across range, bearing, and elevation to find the intercept probability
+    at each point. Returns both 2D heatmap and 3D surface data.
+    """
+    config = EnvelopeConfig(
+        range_min=request.range_min,
+        range_max=request.range_max,
+        range_steps=min(request.range_steps, 15),  # Cap for performance
+        bearing_min=request.bearing_min,
+        bearing_max=request.bearing_max,
+        bearing_steps=min(request.bearing_steps, 20),
+        elevation_min=request.elevation_min,
+        elevation_max=request.elevation_max,
+        elevation_steps=min(request.elevation_steps, 10),
+        runs_per_point=min(request.runs_per_point, 20),
+        guidance_type=GuidanceType(request.guidance),
+        nav_constant=request.nav_constant,
+        kill_radius=request.kill_radius,
+        target_speed=request.target_speed,
+        evasion_type=EvasionType(request.evasion),
+        interceptor_speed=request.interceptor_speed,
+    )
+
+    results = await compute_engagement_envelope(config)
+    return results.to_dict()
 
 
 # ============================================================

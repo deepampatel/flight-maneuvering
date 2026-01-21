@@ -17,17 +17,20 @@ function App() {
     state,
     scenarios,
     guidanceLaws,
+    evasionTypes,
     startRun,
     stopRun,
     runMonteCarlo,
+    runEnvelopeAnalysis,
     monteCarloLoading,
+    envelopeLoading,
   } = useSimulation();
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>Air Dominance Simulation</h1>
-        <span className="subtitle">Phase 2: Proportional Navigation + Monte Carlo</span>
+        <span className="subtitle">Phase 3: Evasion + Multi-Interceptor + Envelope</span>
       </header>
 
       <main className="app-main">
@@ -40,10 +43,13 @@ function App() {
           state={state}
           scenarios={scenarios}
           guidanceLaws={guidanceLaws}
+          evasionTypes={evasionTypes}
           onStart={startRun}
           onStop={stopRun}
           onRunMonteCarlo={runMonteCarlo}
+          onRunEnvelope={runEnvelopeAnalysis}
           monteCarloLoading={monteCarloLoading}
+          envelopeLoading={envelopeLoading}
         />
       </main>
     </div>

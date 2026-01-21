@@ -2,6 +2,27 @@
 
 A real-time air intercept simulation sandbox for learning guidance, control, and autonomy concepts.
 
+## Phase 3: Evasion, Envelopes & Multi-Interceptor ✓
+
+Building on Phase 2, this phase adds advanced tactical features:
+
+- **Target Evasion Maneuvers**: Test guidance against maneuvering targets
+  - Constant Turn: Sustained turn at fixed rate
+  - Weave (S-Turns): Periodic direction reversals
+  - Barrel Roll: 3D spiral evasion maneuver
+  - Random Jink: Unpredictable random direction changes
+- **Engagement Envelope Analysis**: Find the weapon system's reach
+  - Sweep across range, bearing, and elevation
+  - Monte Carlo at each point for statistical confidence
+  - 2D Heatmap visualization (range × bearing)
+  - Identify intercept probability boundaries
+- **Multiple Interceptors**: Spawn 1-8 interceptors with formation spacing
+  - Each runs independent guidance
+  - Distinct color-coded visualization
+  - First-to-intercept wins
+- **Enhanced 3D Trails**: Gradient trails with time markers
+- **Evasive Scenario Presets**: Pre-configured scenarios with evasion
+
 ## Phase 2: Guidance Laws & Monte Carlo Analysis ✓
 
 Building on Phase 1, this phase adds:
@@ -58,10 +79,10 @@ Frontend runs at: http://localhost:5173
 │  │ React App   │──│ useSimulation│──│ WebSocket Client   │  │
 │  └─────────────┘  └──────────────┘  └────────────────────┘  │
 │         │                                      │             │
-│  ┌─────────────┐                              │             │
-│  │ Three.js    │                              │             │
-│  │ 3D Scene    │                              │             │
-│  └─────────────┘                              │             │
+│  ┌─────────────┐  ┌──────────────┐            │             │
+│  │ Three.js    │  │ Heatmap/     │            │             │
+│  │ 3D Scene    │  │ Charts       │            │             │
+│  └─────────────┘  └──────────────┘            │             │
 └───────────────────────────────────────────────│─────────────┘
                                                 │ WebSocket
                                                 │ (50 Hz)
@@ -69,10 +90,18 @@ Frontend runs at: http://localhost:5173
 │                        Backend                │             │
 │  ┌────────────────┐  ┌────────────┐  ┌───────▼──────────┐  │
 │  │ SimEngine      │──│ Guidance   │  │ FastAPI Server   │  │
-│  │ - Entity mgmt  │  │ - Pure     │  │ - REST API       │  │
-│  │ - Physics      │  │   Pursuit  │  │ - WebSocket      │  │
-│  │ - End detect   │  │            │  │   broadcast      │  │
-│  └────────────────┘  └────────────┘  └──────────────────┘  │
+│  │ - Entity mgmt  │  │ - PP/PN    │  │ - REST API       │  │
+│  │ - Physics      │  │ - APN      │  │ - WebSocket      │  │
+│  │ - Multi-intcpt │  └────────────┘  │   broadcast      │  │
+│  └────────────────┘         │        └──────────────────┘  │
+│         │            ┌──────▼─────┐                        │
+│  ┌──────▼─────┐      │ Envelope   │                        │
+│  │ Evasion    │      │ Analysis   │                        │
+│  │ - Turn     │      │ - Sweep    │                        │
+│  │ - Weave    │      │ - Heatmap  │                        │
+│  │ - Barrel   │      └────────────┘                        │
+│  │ - Jink     │                                            │
+│  └────────────┘                                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -104,6 +133,26 @@ Test guidance robustness under uncertainty:
 - Add noise to velocities (5 m/s std dev)
 - View intercept rate, miss distance statistics, histograms
 
+### Target Evasion Maneuvers
+
+Test guidance against maneuvering targets:
+
+**Constant Turn**: Sustained horizontal turn at fixed rate. Creates centripetal acceleration perpendicular to velocity. Simple but effective against pure pursuit.
+
+**Weave (S-Turns)**: Sinusoidal turn rate creates periodic direction reversals. Degrades PN guidance accuracy by creating unpredictable LOS rate changes.
+
+**Barrel Roll**: 3D spiral combining horizontal turn and vertical oscillation. Creates a corkscrew-like path that challenges guidance systems in all axes.
+
+**Random Jink**: Unpredictable direction changes at random intervals. Maximizes uncertainty - most difficult to counter.
+
+### Engagement Envelope
+
+The engagement envelope defines where intercepts are possible:
+- Sweep range (1-5km), bearing (-90° to +90°), and elevation
+- Run Monte Carlo at each point for statistical confidence
+- Visualize as 2D heatmap (range × bearing)
+- Find the boundary of effective weapon reach
+
 ### Coordinate System
 
 We use ENU (East-North-Up):
@@ -125,17 +174,20 @@ air-dominance/
 │   ├── sim/
 │   │   ├── vector.py       # 3D vector math
 │   │   ├── entities.py     # Target & Interceptor models
-│   │   ├── engine.py       # Simulation loop & physics
+│   │   ├── engine.py       # Simulation loop, physics, multi-interceptor
 │   │   ├── guidance.py     # Guidance laws (PP, PN, APN)
+│   │   ├── evasion.py      # Target evasion maneuvers
+│   │   ├── envelope.py     # Engagement envelope analysis
 │   │   └── monte_carlo.py  # Batch simulation & stats
 │   └── server.py           # FastAPI + WebSocket server
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── Scene.tsx        # Three.js 3D visualization
-│       │   └── ControlPanel.tsx # UI controls, guidance, Monte Carlo
+│       │   ├── Scene.tsx        # Three.js 3D visualization + trails
+│       │   └── ControlPanel.tsx # UI controls, evasion, envelope
 │       ├── hooks/
 │       │   └── useSimulation.ts # WebSocket + API state management
+│       ├── types.ts             # TypeScript interfaces
 │       └── App.tsx
 └── README.md
 ```
@@ -144,16 +196,21 @@ air-dominance/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/scenarios` | GET | List preset scenarios |
-| `/scenarios/{name}` | POST | Start a preset scenario |
+| `/scenarios` | GET | List preset scenarios (including evasive) |
+| `/runs` | POST | Start a simulation run |
+| `/runs/current` | GET | Get current run status |
+| `/runs/stop` | POST | Stop the current run |
 | `/guidance` | GET | List available guidance laws |
+| `/evasion` | GET | List available evasion maneuvers |
 | `/monte-carlo` | POST | Run Monte Carlo batch analysis |
 | `/monte-carlo/sweep` | POST | Parameter sweep analysis |
+| `/envelope` | POST | Compute engagement envelope |
 | `/ws` | WebSocket | Real-time 50Hz state stream |
 
-## Next: Phase 3
+## Next: Phase 4
 
-- Engagement envelope analysis
-- Multiple interceptors
-- Target evasion maneuvers
-- 3D trajectory trails in UI
+- **Optimal Intercept Geometry**: Compute lead-pursuit angles and optimal approach vectors
+- **Threat Assessment**: Score targets by approach angle, speed, and time-to-impact
+- **Weapon-Target Assignment (WTA)**: Multi-interceptor coordination and resource allocation
+- **Sensor Modeling**: Radar detection ranges, look angles, and track quality
+- **Recording & Replay**: Save engagements and replay with different parameters

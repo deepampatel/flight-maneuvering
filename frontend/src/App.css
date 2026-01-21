@@ -357,3 +357,108 @@ body {
   color: #64748b;
   margin-top: 0.25rem;
 }
+
+/* Evasion selection */
+.evasion-select {
+  width: 100%;
+  padding: 0.5rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.evasion-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Envelope section */
+.envelope-section {
+  margin-top: 0.5rem;
+}
+
+.envelope-btn {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #334155;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.envelope-btn:hover:not(:disabled) {
+  background: #475569;
+  border-color: #64748b;
+}
+
+.envelope-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.envelope-results {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+/* Heatmap visualization */
+.heatmap-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: #1e293b;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.heatmap-row {
+  display: flex;
+  gap: 1px;
+}
+
+.heatmap-cell {
+  width: 24px;
+  height: 16px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.1);
+  z-index: 1;
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 0.5rem;
+}
+
+.heatmap-gradient {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, hsl(0, 80%, 40%), hsl(60, 80%, 40%), hsl(120, 80%, 40%));
+}
+
+.heatmap-labels {
+  display: flex;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}

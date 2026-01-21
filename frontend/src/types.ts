@@ -47,6 +47,13 @@ export type SimEvent = SimStateEvent | SimCompleteEvent;
 export interface Scenario {
   name: string;
   description: string;
+  evasion?: string;
+}
+
+export interface EvasionType {
+  id: string;
+  name: string;
+  description: string;
 }
 
 export interface GuidanceLaw {
@@ -86,4 +93,68 @@ export interface MonteCarloResults {
 export interface ParameterSweepResults {
   param_name: string;
   results: MonteCarloResults[];
+}
+
+// Engagement Envelope types
+export interface EnvelopeConfig {
+  range_min: number;
+  range_max: number;
+  range_steps: number;
+  bearing_min: number;
+  bearing_max: number;
+  bearing_steps: number;
+  elevation_min: number;
+  elevation_max: number;
+  elevation_steps: number;
+  runs_per_point: number;
+  guidance: string;
+  nav_constant: number;
+  kill_radius: number;
+  target_speed: number;
+  evasion: string;
+  interceptor_speed: number;
+}
+
+export interface EnvelopePoint {
+  range: number;
+  bearing: number;
+  elevation: number;
+  intercept_rate: number;
+  mean_miss_distance: number;
+  mean_time_to_intercept: number;
+}
+
+export interface Heatmap2D {
+  data: number[][];
+  x_label: string;
+  y_label: string;
+  x_values: number[];
+  y_values: number[];
+}
+
+export interface Surface3DVertex {
+  x: number;
+  y: number;
+  z: number;
+  range: number;
+  bearing: number;
+  elevation: number;
+  intercept_rate: number;
+}
+
+export interface Surface3D {
+  surfaces: {
+    elevation: number;
+    vertices: Surface3DVertex[];
+  }[];
+}
+
+export interface EnvelopeResults {
+  config: Record<string, unknown>;
+  range_values: number[];
+  bearing_values: number[];
+  elevation_values: number[];
+  heatmap_2d: Heatmap2D;
+  surface_3d: Surface3D;
+  points: EnvelopePoint[];
 }

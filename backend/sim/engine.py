@@ -22,11 +22,15 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Awaitable, Optional
+from typing import Callable, Awaitable, Optional, List
 import uuid
 
 from .vector import Vec3
 from .entities import Entity, EntityType, create_target, create_interceptor
+from .evasion import (
+    EvasionType, EvasionConfig, EvasionState,
+    EvasionFunction, create_evasion_function, no_evasion
+)
 
 
 class SimStatus(str, Enum):
@@ -61,11 +65,21 @@ class SimState:
     status: SimStatus
     result: EngagementResult
     target: Entity
-    interceptor: Entity
+    interceptors: List[Entity]  # Support multiple interceptors
     miss_distance: float = float('inf')
+    intercepting_id: Optional[str] = None  # Which interceptor hit (if any)
+
+    # Legacy property for backward compatibility
+    @property
+    def interceptor(self) -> Entity:
+        """Get first interceptor (for backward compatibility)."""
+        return self.interceptors[0] if self.interceptors else None
 
     def to_event(self) -> dict:
         """Convert to event for transmission."""
+        entities = [self.target.to_state_dict()]
+        entities.extend(i.to_state_dict() for i in self.interceptors)
+
         return {
             "type": "state",
             "run_id": self.run_id,
@@ -74,11 +88,9 @@ class SimState:
             "tick": self.tick,
             "status": self.status.value,
             "result": self.result.value,
-            "entities": [
-                self.target.to_state_dict(),
-                self.interceptor.to_state_dict(),
-            ],
+            "entities": entities,
             "miss_distance": self.miss_distance,
+            "intercepting_id": self.intercepting_id,
         }
 
 
@@ -127,19 +139,31 @@ class SimEngine:
     1. Maintain simulation state
     2. Run the fixed-timestep loop
     3. Apply guidance laws
-    4. Detect end conditions
-    5. Emit events for UI/logging
+    4. Apply target evasion maneuvers
+    5. Detect end conditions
+    6. Emit events for UI/logging
     """
 
     def __init__(
         self,
         config: Optional[SimConfig] = None,
         guidance: Optional[GuidanceFunction] = None,
+        evasion_type: EvasionType = EvasionType.NONE,
+        evasion_config: Optional[EvasionConfig] = None,
     ):
         self.config = config or SimConfig()
         self.guidance = guidance or pure_pursuit_guidance
         self.state: Optional[SimState] = None
         self._event_handlers: list[Callable[[dict], Awaitable[None]]] = []
+
+        # Evasion setup
+        self.evasion_type = evasion_type
+        evasion_fn, evasion_state, evasion_cfg = create_evasion_function(
+            evasion_type, evasion_config
+        )
+        self._evasion_fn = evasion_fn
+        self._evasion_state = evasion_state
+        self._evasion_config = evasion_cfg
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -160,14 +184,49 @@ class SimEngine:
         interceptor_start: Vec3,
         interceptor_velocity: Vec3,
         run_id: Optional[str] = None,
+        num_interceptors: int = 1,
+        interceptor_spacing: float = 200.0,  # meters between interceptors
     ) -> None:
         """
         Initialize a new scenario.
 
         Typical setup:
         - Target flying across the field
-        - Interceptor starting from a base/launch point
+        - One or more interceptors starting from a base/launch point
+
+        Args:
+            num_interceptors: Number of interceptors to spawn
+            interceptor_spacing: Lateral spacing between interceptors (meters)
         """
+        # Create interceptors with lateral offset
+        interceptors = []
+        for i in range(num_interceptors):
+            # Offset perpendicular to initial velocity direction
+            if num_interceptors > 1:
+                # Center the formation around the base position
+                offset_index = i - (num_interceptors - 1) / 2
+                # Perpendicular direction in XY plane
+                vel_mag = interceptor_velocity.magnitude()
+                if vel_mag > 0:
+                    perp = Vec3(
+                        -interceptor_velocity.y / vel_mag,
+                        interceptor_velocity.x / vel_mag,
+                        0
+                    )
+                else:
+                    perp = Vec3(0, 1, 0)
+                offset = perp * (offset_index * interceptor_spacing)
+                start_pos = interceptor_start + offset
+            else:
+                start_pos = interceptor_start
+
+            interceptors.append(
+                create_interceptor(start_pos, interceptor_velocity, f"I{i+1}")
+            )
+
+        # Reset evasion state for new scenario
+        self._evasion_state = EvasionState()
+
         self.state = SimState(
             run_id=run_id or str(uuid.uuid4())[:8],
             sim_time=0.0,
@@ -175,7 +234,7 @@ class SimEngine:
             status=SimStatus.READY,
             result=EngagementResult.PENDING,
             target=create_target(target_start, target_velocity),
-            interceptor=create_interceptor(interceptor_start, interceptor_velocity),
+            interceptors=interceptors,
         )
 
     def _check_end_conditions(self) -> None:
@@ -183,16 +242,26 @@ class SimEngine:
         if self.state is None:
             return
 
-        # Calculate current miss distance
-        self.state.miss_distance = self.state.interceptor.position.distance_to(
-            self.state.target.position
-        )
+        # Calculate miss distance for each interceptor, track minimum
+        min_miss_distance = float('inf')
+        closest_interceptor = None
 
-        # Check intercept (hit)
-        if self.state.miss_distance <= self.config.kill_radius:
-            self.state.status = SimStatus.COMPLETED
-            self.state.result = EngagementResult.INTERCEPT
-            return
+        for interceptor in self.state.interceptors:
+            dist = interceptor.position.distance_to(self.state.target.position)
+            if dist < min_miss_distance:
+                min_miss_distance = dist
+                closest_interceptor = interceptor
+
+        self.state.miss_distance = min_miss_distance
+
+        # Check intercept (any interceptor hits)
+        for interceptor in self.state.interceptors:
+            dist = interceptor.position.distance_to(self.state.target.position)
+            if dist <= self.config.kill_radius:
+                self.state.status = SimStatus.COMPLETED
+                self.state.result = EngagementResult.INTERCEPT
+                self.state.intercepting_id = interceptor.id
+                return
 
         # Check timeout
         if self.state.sim_time >= self.config.max_time:
@@ -200,16 +269,26 @@ class SimEngine:
             self.state.result = EngagementResult.TIMEOUT
             return
 
-        # Check if interceptor passed target (opening fast means we missed)
+        # Check if all interceptors have missed (opening fast means they missed)
         # Only check after initial approach phase (first 2 seconds)
         if self.state.sim_time > 2.0:
-            to_target = self.state.target.position - self.state.interceptor.position
-            # Positive = closing, Negative = opening
-            closing_velocity = to_target.normalized().dot(
-                self.state.interceptor.velocity - self.state.target.velocity
-            )
-            if closing_velocity < -50 and self.state.miss_distance > 100:
-                # Moving away fast and far - missed
+            all_missed = True
+            for interceptor in self.state.interceptors:
+                to_target = self.state.target.position - interceptor.position
+                dist = to_target.magnitude()
+                if dist < 1.0:
+                    all_missed = False
+                    continue
+                # Positive = closing, Negative = opening
+                closing_velocity = to_target.normalized().dot(
+                    interceptor.velocity - self.state.target.velocity
+                )
+                # Still approaching or close enough
+                if closing_velocity > -50 or dist < 100:
+                    all_missed = False
+                    break
+
+            if all_missed:
                 self.state.status = SimStatus.COMPLETED
                 self.state.result = EngagementResult.MISSED
 
@@ -218,32 +297,57 @@ class SimEngine:
         Execute one simulation step.
 
         This is the core loop that runs at 50 Hz:
-        1. Apply guidance law to get acceleration command
-        2. Update entity physics
-        3. Check end conditions
-        4. Emit state event
+        1. Apply target evasion maneuver
+        2. Apply guidance law to each interceptor
+        3. Update entity physics
+        4. Check end conditions
+        5. Emit state event
         """
         if self.state is None or self.state.status != SimStatus.RUNNING:
             return
 
         dt = self.config.dt
 
-        # 1. GUIDANCE: Calculate interceptor acceleration
-        accel_cmd = self.guidance(self.state)
-        self.state.interceptor.set_acceleration(accel_cmd)
+        # 1. EVASION: Calculate target evasion acceleration
+        evasion_accel = self._evasion_fn(
+            self.state.target.position,
+            self.state.target.velocity,
+            dt,
+            self._evasion_state,
+            self._evasion_config,
+        )
+        self.state.target.set_acceleration(evasion_accel)
 
-        # 2. PHYSICS: Update all entities
+        # 2. GUIDANCE: Calculate acceleration for each interceptor
+        for interceptor in self.state.interceptors:
+            # Create a temporary state view for this interceptor
+            # This allows guidance to work with single interceptor abstraction
+            temp_state = SimState(
+                run_id=self.state.run_id,
+                sim_time=self.state.sim_time,
+                tick=self.state.tick,
+                status=self.state.status,
+                result=self.state.result,
+                target=self.state.target,
+                interceptors=[interceptor],  # Single interceptor view
+                miss_distance=interceptor.position.distance_to(self.state.target.position),
+            )
+            accel_cmd = self.guidance(temp_state)
+            interceptor.set_acceleration(accel_cmd)
+
+        # 3. PHYSICS: Update all entities
         self.state.target.update(dt)
-        self.state.interceptor.update(dt)
+        for interceptor in self.state.interceptors:
+            interceptor.update(dt)
 
-        # 3. Update sim time
+        # 4. Update sim time
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 4. Check end conditions
+        # 5. Check end conditions
         self._check_end_conditions()
 
-        # 5. Emit state event
+        # 6. Emit state event
         await self._emit_event(self.state.to_event())
 
     async def run(self) -> SimState:
@@ -294,8 +398,6 @@ class SimEngine:
 
 
 # Pre-built scenarios for easy testing
-# Note: Pure pursuit works best against slow/straight targets
-# Phase 2 will add proportional navigation for better performance
 SCENARIOS = {
     "head_on": {
         "description": "Classic head-on intercept",
@@ -303,6 +405,7 @@ SCENARIOS = {
         "target_velocity": Vec3(-100, 0, 0),      # Flying west at 100 m/s (slower)
         "interceptor_start": Vec3(0, 0, 600),     # At origin, 600m up
         "interceptor_velocity": Vec3(150, 0, 20), # Initial eastward, slight climb
+        "evasion": EvasionType.NONE,
     },
     "crossing": {
         "description": "Target crossing perpendicular to interceptor",
@@ -310,6 +413,7 @@ SCENARIOS = {
         "target_velocity": Vec3(0, 80, 0),        # Flying north at 80 m/s
         "interceptor_start": Vec3(0, 0, 600),
         "interceptor_velocity": Vec3(100, 50, 15),
+        "evasion": EvasionType.NONE,
     },
     "tail_chase": {
         "description": "Interceptor chasing from behind",
@@ -317,6 +421,56 @@ SCENARIOS = {
         "target_velocity": Vec3(80, 0, 0),        # Flying away at 80 m/s
         "interceptor_start": Vec3(0, 0, 600),
         "interceptor_velocity": Vec3(200, 0, 10), # Much faster than target
+        "evasion": EvasionType.NONE,
+    },
+    # Evasive scenarios
+    "head_on_turning": {
+        "description": "Head-on with constant turn evasion",
+        "target_start": Vec3(3000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.CONSTANT_TURN,
+    },
+    "head_on_weaving": {
+        "description": "Head-on with weave (S-turn) evasion",
+        "target_start": Vec3(3000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.WEAVE,
+    },
+    "head_on_barrel_roll": {
+        "description": "Head-on with 3D barrel roll evasion",
+        "target_start": Vec3(3000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.BARREL_ROLL,
+    },
+    "head_on_jinking": {
+        "description": "Head-on with random jink evasion",
+        "target_start": Vec3(3000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.RANDOM_JINK,
+    },
+    "crossing_weaving": {
+        "description": "Crossing target with weave evasion",
+        "target_start": Vec3(2000, -1500, 800),
+        "target_velocity": Vec3(0, 80, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(100, 50, 15),
+        "evasion": EvasionType.WEAVE,
+    },
+    "tail_chase_jinking": {
+        "description": "Tail chase with random jink evasion",
+        "target_start": Vec3(800, 0, 700),
+        "target_velocity": Vec3(80, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(200, 0, 10),
+        "evasion": EvasionType.RANDOM_JINK,
     },
 }
 
