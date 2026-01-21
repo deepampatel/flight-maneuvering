@@ -28,6 +28,14 @@ from sim.guidance import GuidanceType, GuidanceParams, create_guidance_function
 from sim.monte_carlo import MonteCarloConfig, run_monte_carlo, parameter_sweep
 from sim.evasion import EvasionType, EvasionConfig
 from sim.envelope import EnvelopeConfig, compute_engagement_envelope
+from sim.intercept import compute_intercept_geometry, compute_all_geometries
+from sim.threat import (
+    ThreatWeights, compute_threat_score, assess_all_threats, quick_threat_assessment
+)
+from sim.recording import (
+    RecordingManager, ReplayEngine, ReplayConfig,
+    EngagementRecording, get_recording_manager
+)
 
 
 # ============================================================
@@ -78,6 +86,9 @@ class ConnectionManager:
 manager = ConnectionManager()
 current_engine: Optional[SimEngine] = None
 run_task: Optional[asyncio.Task] = None
+recording_manager = get_recording_manager()
+current_replay_engine: Optional[ReplayEngine] = None
+replay_task: Optional[asyncio.Task] = None
 
 
 # ============================================================
@@ -157,6 +168,27 @@ class RunStatus(BaseModel):
     status: str
     sim_time: float
     result: Optional[str]
+
+
+class ThreatWeightsRequest(BaseModel):
+    """Custom weights for threat scoring."""
+    time_to_impact: float = 0.35
+    closing_velocity: float = 0.25
+    aspect_angle: float = 0.20
+    altitude_advantage: float = 0.10
+    maneuverability: float = 0.10
+
+
+class ReplayConfigRequest(BaseModel):
+    """Configuration for replay playback."""
+    speed_multiplier: float = 1.0
+    start_tick: int = 0
+    end_tick: Optional[int] = None
+
+
+class RecordingStartRequest(BaseModel):
+    """Request to start recording."""
+    scenario_name: Optional[str] = None
 
 
 # ============================================================
@@ -288,6 +320,18 @@ async def start_run(config: RunConfig):
     # Register broadcast handler
     current_engine.on_event(manager.broadcast)
 
+    # Register recording handler if recording is active
+    async def recording_handler(event: dict):
+        if recording_manager.is_recording and event.get("type") == "state":
+            # Extract state from event for recording
+            recording_manager.record_frame(
+                tick=event.get("tick", 0),
+                sim_time=event.get("sim_time", 0.0),
+                target=current_engine.state.target,
+                interceptors=current_engine.state.interceptors,
+            )
+    current_engine.on_event(recording_handler)
+
     # Setup scenario
     current_engine.setup_scenario(
         target_start=scenario["target_start"],
@@ -331,6 +375,11 @@ async def stop_run():
 
     if run_task and not run_task.done():
         run_task.cancel()
+        # Wait for the task to actually finish so events are emitted
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass  # Expected
         return {"status": "stopped"}
 
     return {"status": "no_run_active"}
@@ -444,6 +493,314 @@ async def run_envelope_analysis(request: EnvelopeRequest):
 
     results = await compute_engagement_envelope(config)
     return results.to_dict()
+
+
+# ============================================================
+# Intercept Geometry Endpoints
+# ============================================================
+
+@app.get("/intercept-geometry")
+async def get_intercept_geometry():
+    """
+    Get current intercept geometry from running simulation.
+
+    Returns geometry for all interceptor-target pairs including:
+    - LOS range and rate
+    - Aspect and antenna train angles
+    - Lead angle and collision course status
+    - Time to intercept prediction
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    geometries = compute_all_geometries(state.interceptors, state.target)
+
+    return {
+        "timestamp": state.sim_time,
+        "geometries": [g.to_dict() for g in geometries]
+    }
+
+
+# ============================================================
+# Threat Assessment Endpoints
+# ============================================================
+
+@app.get("/threat-assessment")
+async def get_threat_assessment(interceptor_id: str = None):
+    """
+    Get threat assessment from current simulation state.
+
+    Returns threat scores for all targets ranked by priority.
+    Optionally filter by interceptor_id.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    assessments = []
+
+    # Get interceptors to assess from
+    interceptors = state.interceptors
+    if interceptor_id:
+        interceptors = [i for i in interceptors if i.id == interceptor_id]
+        if not interceptors:
+            raise HTTPException(status_code=404, detail=f"Interceptor {interceptor_id} not found")
+
+    for interceptor in interceptors:
+        # Compute geometry first
+        geometry = compute_intercept_geometry(interceptor, state.target)
+        # Then threat assessment
+        assessment = assess_all_threats(
+            interceptor,
+            [state.target],
+            [geometry]
+        )
+        assessments.append(assessment.to_dict())
+
+    return {"assessments": assessments}
+
+
+@app.post("/threat-assessment/configure")
+async def configure_threat_weights(weights: ThreatWeightsRequest):
+    """
+    Configure custom threat weights (for testing/tuning).
+
+    Weights should sum to 1.0 (will be normalized if not).
+    """
+    return {
+        "status": "ok",
+        "normalized_weights": {
+            "time_to_impact": weights.time_to_impact,
+            "closing_velocity": weights.closing_velocity,
+            "aspect_angle": weights.aspect_angle,
+            "altitude_advantage": weights.altitude_advantage,
+            "maneuverability": weights.maneuverability
+        }
+    }
+
+
+# ============================================================
+# Recording Endpoints
+# ============================================================
+
+@app.post("/recordings/start")
+async def start_recording(request: RecordingStartRequest = None):
+    """
+    Start recording the current/next simulation.
+
+    Recording will capture all state changes until stopped.
+    """
+    global recording_manager
+
+    if recording_manager.is_recording:
+        return {"status": "already_recording", "recording_id": recording_manager.active_recording.recording_id}
+
+    # Determine scenario name
+    scenario_name = "unknown"
+    config = {}
+
+    if request and request.scenario_name:
+        scenario_name = request.scenario_name
+    elif current_engine and current_engine.state:
+        # Try to get from current engine
+        scenario_name = "live_capture"
+
+    if current_engine:
+        config = {
+            "guidance_type": "unknown",  # Would need to track this
+            "evasion_type": "unknown",
+            "dt": current_engine.config.dt if current_engine.config else 0.02
+        }
+
+    recording_id = recording_manager.start_recording(scenario_name, config)
+
+    return {
+        "status": "recording_started",
+        "recording_id": recording_id
+    }
+
+
+@app.post("/recordings/stop")
+async def stop_recording():
+    """
+    Stop recording and save the engagement.
+    """
+    global recording_manager
+
+    if not recording_manager.is_recording:
+        return {"status": "not_recording"}
+
+    # Get final state from engine if available
+    result = "unknown"
+    miss_distance = 0.0
+    sim_time = 0.0
+
+    if current_engine and current_engine.state:
+        result = current_engine.state.result.value
+        miss_distance = current_engine.state.miss_distance
+        sim_time = current_engine.state.sim_time
+
+    recording = recording_manager.stop_recording(result, miss_distance, sim_time)
+
+    if recording:
+        filepath = recording_manager.save_recording(recording)
+        return {
+            "status": "recording_saved",
+            "recording_id": recording.recording_id,
+            "filepath": filepath,
+            "total_frames": len(recording.frames)
+        }
+
+    return {"status": "error", "message": "Failed to stop recording"}
+
+
+@app.get("/recordings")
+async def list_recordings():
+    """List all saved recordings."""
+    global recording_manager
+    recordings = recording_manager.list_recordings()
+    return {
+        "recordings": recordings,
+        "total": len(recordings)
+    }
+
+
+@app.get("/recordings/{recording_id}")
+async def get_recording(recording_id: str):
+    """Get recording details and metadata."""
+    global recording_manager
+    recording = recording_manager.load_recording(recording_id)
+
+    if not recording:
+        raise HTTPException(status_code=404, detail=f"Recording {recording_id} not found")
+
+    return recording.to_metadata()
+
+
+@app.delete("/recordings/{recording_id}")
+async def delete_recording(recording_id: str):
+    """Delete a recording."""
+    global recording_manager
+
+    if recording_manager.delete_recording(recording_id):
+        return {"status": "deleted", "recording_id": recording_id}
+
+    raise HTTPException(status_code=404, detail=f"Recording {recording_id} not found")
+
+
+# ============================================================
+# Replay Endpoints
+# ============================================================
+
+@app.post("/replay/{recording_id}/start")
+async def start_replay(recording_id: str, config: ReplayConfigRequest = None):
+    """
+    Start replaying a recording.
+
+    Events are streamed via WebSocket just like live simulation.
+    """
+    global current_replay_engine, replay_task, recording_manager
+
+    # Stop any existing replay
+    if replay_task and not replay_task.done():
+        replay_task.cancel()
+        try:
+            await replay_task
+        except asyncio.CancelledError:
+            pass
+
+    # Load recording
+    recording = recording_manager.load_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail=f"Recording {recording_id} not found")
+
+    # Create replay config
+    replay_config = ReplayConfig(
+        speed_multiplier=config.speed_multiplier if config else 1.0,
+        start_tick=config.start_tick if config else 0,
+        end_tick=config.end_tick if config else None
+    )
+
+    # Create replay engine
+    current_replay_engine = ReplayEngine(recording, replay_config)
+    current_replay_engine.on_event(manager.broadcast)
+
+    # Start replay in background
+    replay_task = asyncio.create_task(current_replay_engine.play())
+
+    return {
+        "status": "replay_started",
+        "recording_id": recording_id,
+        "total_ticks": len(recording.frames),
+        "speed_multiplier": replay_config.speed_multiplier
+    }
+
+
+@app.post("/replay/pause")
+async def pause_replay():
+    """Pause current replay."""
+    global current_replay_engine
+
+    if current_replay_engine and current_replay_engine.is_playing:
+        await current_replay_engine.pause()
+        return {"status": "paused"}
+
+    return {"status": "no_replay_active"}
+
+
+@app.post("/replay/resume")
+async def resume_replay():
+    """Resume paused replay."""
+    global current_replay_engine
+
+    if current_replay_engine and current_replay_engine.is_paused:
+        await current_replay_engine.resume()
+        return {"status": "resumed"}
+
+    return {"status": "no_paused_replay"}
+
+
+@app.post("/replay/seek")
+async def seek_replay(tick: int):
+    """Seek to specific tick in replay."""
+    global current_replay_engine
+
+    if current_replay_engine:
+        await current_replay_engine.seek(tick)
+        return {"status": "seeked", "tick": tick}
+
+    return {"status": "no_replay_active"}
+
+
+@app.post("/replay/stop")
+async def stop_replay():
+    """Stop current replay."""
+    global current_replay_engine, replay_task
+
+    if replay_task and not replay_task.done():
+        replay_task.cancel()
+        try:
+            await replay_task
+        except asyncio.CancelledError:
+            pass
+
+    if current_replay_engine:
+        await current_replay_engine.stop()
+        current_replay_engine = None
+
+    return {"status": "stopped"}
+
+
+@app.get("/replay/state")
+async def get_replay_state():
+    """Get current replay state."""
+    global current_replay_engine
+
+    if current_replay_engine:
+        return current_replay_engine.get_state()
+
+    return {"status": "no_replay_active"}
 
 
 # ============================================================

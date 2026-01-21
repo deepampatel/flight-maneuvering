@@ -355,6 +355,7 @@ class SimEngine:
         Run the simulation to completion.
 
         This manages real-time pacing if configured.
+        Handles cancellation gracefully by emitting a stopped event.
         """
         if self.state is None:
             raise RuntimeError("No scenario set up. Call setup_scenario first.")
@@ -367,21 +368,47 @@ class SimEngine:
         wall_start = time.monotonic()
         sim_start = self.state.sim_time
 
-        while self.state.status == SimStatus.RUNNING:
-            tick_start = time.monotonic()
+        try:
+            while self.state.status == SimStatus.RUNNING:
+                tick_start = time.monotonic()
 
-            # Run one simulation step
-            await self.tick()
+                # Run one simulation step
+                await self.tick()
 
-            # Real-time pacing
-            if self.config.real_time and self.state.status == SimStatus.RUNNING:
-                # How much wall time SHOULD have passed?
-                expected_wall = (self.state.sim_time - sim_start)
-                actual_wall = time.monotonic() - wall_start
-                sleep_time = expected_wall - actual_wall
+                # Real-time pacing
+                if self.config.real_time and self.state.status == SimStatus.RUNNING:
+                    # How much wall time SHOULD have passed?
+                    expected_wall = (self.state.sim_time - sim_start)
+                    actual_wall = time.monotonic() - wall_start
+                    sleep_time = expected_wall - actual_wall
 
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+
+        except asyncio.CancelledError:
+            # Handle graceful cancellation (e.g., user clicked ABORT)
+            self.state.status = SimStatus.COMPLETED
+            self.state.result = EngagementResult.TIMEOUT  # Mark as stopped/timeout
+
+            # Shield emit operations from cancellation so UI gets the update
+            try:
+                # Emit final state so UI updates immediately
+                await asyncio.shield(self._emit_event(self.state.to_event()))
+
+                # Emit stopped event so UI knows simulation ended
+                await asyncio.shield(self._emit_event({
+                    "type": "complete",
+                    "run_id": self.state.run_id,
+                    "ts": time.time(),
+                    "result": "stopped",
+                    "final_miss_distance": self.state.miss_distance,
+                    "sim_time": self.state.sim_time,
+                    "ticks": self.state.tick,
+                }))
+            except asyncio.CancelledError:
+                pass  # Ignore if shield still gets cancelled
+
+            raise  # Re-raise so the caller knows it was cancelled
 
         # Emit final event
         await self._emit_event({

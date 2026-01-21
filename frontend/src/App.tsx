@@ -1,11 +1,13 @@
 /**
- * Main App Component
+ * Main App Component - Mission Control UI
  *
  * Layout:
- * - Left: 3D visualization (takes most space)
- * - Right: Control panel with telemetry
+ * - Top: Mission controls toolbar
+ * - Center: 3D visualization (full width)
+ * - Bottom: Compact telemetry bar + expandable panels
  */
 
+import { useState } from 'react';
 import { SimulationScene } from './components/Scene';
 import { ControlPanel } from './components/ControlPanel';
 import { useSimulation } from './hooks/useSimulation';
@@ -24,33 +26,72 @@ function App() {
     runEnvelopeAnalysis,
     monteCarloLoading,
     envelopeLoading,
+    // Phase 4
+    interceptGeometry,
+    fetchInterceptGeometry,
+    threatAssessment,
+    fetchThreatAssessment,
+    isRecording,
+    recordings,
+    startRecording,
+    stopRecording,
+    deleteRecording,
+    replayState,
+    startReplay,
+    pauseReplay,
+    resumeReplay,
+    stopReplay,
   } = useSimulation();
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Air Dominance Simulation</h1>
-        <span className="subtitle">Phase 3: Evasion + Multi-Interceptor + Envelope</span>
+        <div className="header-left">
+          <h1>AIR DOMINANCE</h1>
+          <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
+            <span className="status-dot" />
+            {connected ? 'ONLINE' : 'OFFLINE'}
+          </div>
+        </div>
+        <div className="header-center">
+          <ControlPanel
+            connected={connected}
+            state={state}
+            scenarios={scenarios}
+            guidanceLaws={guidanceLaws}
+            evasionTypes={evasionTypes}
+            onStart={startRun}
+            onStop={stopRun}
+            onRunMonteCarlo={runMonteCarlo}
+            onRunEnvelope={runEnvelopeAnalysis}
+            monteCarloLoading={monteCarloLoading}
+            envelopeLoading={envelopeLoading}
+            interceptGeometry={interceptGeometry}
+            threatAssessment={threatAssessment}
+            onFetchInterceptGeometry={fetchInterceptGeometry}
+            onFetchThreatAssessment={fetchThreatAssessment}
+            isRecording={isRecording}
+            recordings={recordings}
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+            onDeleteRecording={deleteRecording}
+            replayState={replayState}
+            onStartReplay={startReplay}
+            onPauseReplay={pauseReplay}
+            onResumeReplay={resumeReplay}
+            onStopReplay={stopReplay}
+            showAdvanced={showAdvanced}
+            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+          />
+        </div>
       </header>
 
       <main className="app-main">
         <div className="scene-container">
-          <SimulationScene state={state} />
+          <SimulationScene state={state} interceptGeometry={interceptGeometry} />
         </div>
-
-        <ControlPanel
-          connected={connected}
-          state={state}
-          scenarios={scenarios}
-          guidanceLaws={guidanceLaws}
-          evasionTypes={evasionTypes}
-          onStart={startRun}
-          onStop={stopRun}
-          onRunMonteCarlo={runMonteCarlo}
-          onRunEnvelope={runEnvelopeAnalysis}
-          monteCarloLoading={monteCarloLoading}
-          envelopeLoading={envelopeLoading}
-        />
       </main>
     </div>
   );

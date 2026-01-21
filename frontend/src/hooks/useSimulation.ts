@@ -26,6 +26,11 @@ import type {
   ParameterSweepResults,
   EnvelopeConfig,
   EnvelopeResults,
+  InterceptGeometry,
+  ThreatAssessment,
+  RecordingMetadata,
+  ReplayState,
+  ReplayConfig,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -68,6 +73,26 @@ interface UseSimulationReturn {
   runEnvelopeAnalysis: (config: Partial<EnvelopeConfig>) => Promise<EnvelopeResults>;
   monteCarloLoading: boolean;
   envelopeLoading: boolean;
+  // Phase 4: Intercept Geometry
+  interceptGeometry: InterceptGeometry[] | null;
+  fetchInterceptGeometry: () => Promise<void>;
+  // Phase 4: Threat Assessment
+  threatAssessment: ThreatAssessment[] | null;
+  fetchThreatAssessment: () => Promise<void>;
+  // Phase 4: Recording
+  isRecording: boolean;
+  recordings: RecordingMetadata[];
+  startRecording: () => Promise<string>;
+  stopRecording: () => Promise<void>;
+  refreshRecordings: () => Promise<void>;
+  deleteRecording: (recordingId: string) => Promise<void>;
+  // Phase 4: Replay
+  replayState: ReplayState | null;
+  startReplay: (recordingId: string, config?: Partial<ReplayConfig>) => Promise<void>;
+  pauseReplay: () => Promise<void>;
+  resumeReplay: () => Promise<void>;
+  seekReplay: (tick: number) => Promise<void>;
+  stopReplay: () => Promise<void>;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -78,8 +103,15 @@ export function useSimulation(): UseSimulationReturn {
   const [evasionTypes, setEvasionTypes] = useState<EvasionType[]>([]);
   const [monteCarloLoading, setMonteCarloLoading] = useState(false);
   const [envelopeLoading, setEnvelopeLoading] = useState(false);
+  // Phase 4: Intercept Geometry & Threat Assessment
+  const [interceptGeometry, setInterceptGeometry] = useState<InterceptGeometry[] | null>(null);
+  const [threatAssessment, setThreatAssessment] = useState<ThreatAssessment[] | null>(null);
+  // Phase 4: Recording & Replay
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordings, setRecordings] = useState<RecordingMetadata[]>([]);
+  const [replayState, setReplayState] = useState<ReplayState | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<number>();
+  const reconnectTimeoutRef = useRef<number | undefined>(undefined);
 
   // Fetch available scenarios, guidance laws, and evasion types on mount
   useEffect(() => {
@@ -276,6 +308,139 @@ export function useSimulation(): UseSimulationReturn {
     []
   );
 
+  // Phase 4: Fetch intercept geometry
+  const fetchInterceptGeometry = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/intercept-geometry`);
+      if (response.ok) {
+        const data = await response.json();
+        setInterceptGeometry(data.geometries);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 4: Fetch threat assessment
+  const fetchThreatAssessment = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/threat-assessment`);
+      if (response.ok) {
+        const data = await response.json();
+        setThreatAssessment(data.assessments);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 4: Start recording
+  const startRecording = useCallback(async (): Promise<string> => {
+    const response = await fetch(`${API_URL}/recordings/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await response.json();
+    if (data.status === 'recording_started' || data.status === 'already_recording') {
+      setIsRecording(true);
+    }
+    return data.recording_id;
+  }, []);
+
+  // Phase 4: Stop recording
+  const stopRecording = useCallback(async () => {
+    const response = await fetch(`${API_URL}/recordings/stop`, {
+      method: 'POST',
+    });
+    const data = await response.json();
+    if (data.status === 'recording_saved') {
+      setIsRecording(false);
+      // Refresh recordings list
+      const listResponse = await fetch(`${API_URL}/recordings`);
+      const listData = await listResponse.json();
+      setRecordings(listData.recordings);
+    }
+  }, []);
+
+  // Phase 4: Refresh recordings list
+  const refreshRecordings = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/recordings`);
+      const data = await response.json();
+      setRecordings(data.recordings);
+    } catch (e) {
+      console.error('Failed to fetch recordings:', e);
+    }
+  }, []);
+
+  // Phase 4: Delete recording
+  const deleteRecording = useCallback(async (recordingId: string) => {
+    await fetch(`${API_URL}/recordings/${recordingId}`, {
+      method: 'DELETE',
+    });
+    // Refresh list
+    const response = await fetch(`${API_URL}/recordings`);
+    const data = await response.json();
+    setRecordings(data.recordings);
+  }, []);
+
+  // Phase 4: Start replay
+  const startReplay = useCallback(async (recordingId: string, config?: Partial<ReplayConfig>) => {
+    setState(null); // Clear previous state
+    const response = await fetch(`${API_URL}/replay/${recordingId}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config || {}),
+    });
+    const data = await response.json();
+    if (data.status === 'replay_started') {
+      // Fetch replay state
+      const stateResponse = await fetch(`${API_URL}/replay/state`);
+      const stateData = await stateResponse.json();
+      if (stateData.recording_id) {
+        setReplayState(stateData);
+      }
+    }
+  }, []);
+
+  // Phase 4: Pause replay
+  const pauseReplay = useCallback(async () => {
+    await fetch(`${API_URL}/replay/pause`, { method: 'POST' });
+    // Update replay state
+    const response = await fetch(`${API_URL}/replay/state`);
+    const data = await response.json();
+    if (data.recording_id) {
+      setReplayState(data);
+    }
+  }, []);
+
+  // Phase 4: Resume replay
+  const resumeReplay = useCallback(async () => {
+    await fetch(`${API_URL}/replay/resume`, { method: 'POST' });
+    const response = await fetch(`${API_URL}/replay/state`);
+    const data = await response.json();
+    if (data.recording_id) {
+      setReplayState(data);
+    }
+  }, []);
+
+  // Phase 4: Seek replay
+  const seekReplay = useCallback(async (tick: number) => {
+    await fetch(`${API_URL}/replay/seek?tick=${tick}`, { method: 'POST' });
+  }, []);
+
+  // Phase 4: Stop replay
+  const stopReplay = useCallback(async () => {
+    await fetch(`${API_URL}/replay/stop`, { method: 'POST' });
+    setReplayState(null);
+  }, []);
+
+  // Fetch recordings on mount
+  useEffect(() => {
+    refreshRecordings();
+  }, [refreshRecordings]);
+
   return {
     connected,
     state,
@@ -289,5 +454,25 @@ export function useSimulation(): UseSimulationReturn {
     runEnvelopeAnalysis,
     monteCarloLoading,
     envelopeLoading,
+    // Phase 4: Intercept Geometry
+    interceptGeometry,
+    fetchInterceptGeometry,
+    // Phase 4: Threat Assessment
+    threatAssessment,
+    fetchThreatAssessment,
+    // Phase 4: Recording
+    isRecording,
+    recordings,
+    startRecording,
+    stopRecording,
+    refreshRecordings,
+    deleteRecording,
+    // Phase 4: Replay
+    replayState,
+    startReplay,
+    pauseReplay,
+    resumeReplay,
+    seekReplay,
+    stopReplay,
   };
 }

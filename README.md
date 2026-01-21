@@ -2,6 +2,33 @@
 
 A real-time air intercept simulation sandbox for learning guidance, control, and autonomy concepts.
 
+## Phase 4: Intercept Geometry, Threat Assessment & Recording ✓
+
+Building on Phase 3, this phase adds tactical decision support and mission replay:
+
+- **Intercept Geometry Analysis**: Real-time computation of engagement parameters
+  - Line-of-Sight (LOS) range and rate
+  - Aspect angle and Antenna Train Angle (ATA)
+  - Lead angle for optimal intercept
+  - Time-to-intercept (TTI) estimation
+  - Closing velocity and collision course detection
+- **Threat Assessment**: Score and prioritize targets
+  - Time-to-impact scoring (closer = higher threat)
+  - Closing velocity analysis
+  - Aspect angle evaluation
+  - Threat levels: CRITICAL, HIGH, MEDIUM, LOW
+  - Engagement recommendations
+- **Recording & Replay System**: Capture and analyze engagements
+  - Record simulation state at 50Hz
+  - Save to disk with metadata
+  - Replay with pause/resume controls
+  - Delete old recordings
+- **Mission Control UI Redesign**: Compact, aerospace-style interface
+  - Horizontal toolbar with all controls
+  - Full-screen 3D visualization
+  - Floating telemetry HUD overlay
+  - Slide-out advanced panel (Monte Carlo, Envelope, Recordings)
+
 ## Phase 3: Evasion, Envelopes & Multi-Interceptor ✓
 
 Building on Phase 2, this phase adds advanced tactical features:
@@ -66,9 +93,11 @@ Frontend runs at: http://localhost:5173
 ### 3. Run a Scenario
 
 1. Open http://localhost:5173 in your browser
-2. Click one of the scenario buttons (HEAD ON, CROSSING, TAIL CHASE)
-3. Watch the interceptor (blue) chase the target (red)
-4. Use mouse to rotate/zoom the 3D view
+2. Select scenario, guidance law, evasion type from the toolbar
+3. Click LAUNCH to start the simulation
+4. Watch the interceptor (blue) chase the target (red)
+5. Use mouse to rotate/zoom the 3D view
+6. Click ADV to access Monte Carlo, Envelope, and Recordings
 
 ## Architecture
 
@@ -79,10 +108,10 @@ Frontend runs at: http://localhost:5173
 │  │ React App   │──│ useSimulation│──│ WebSocket Client   │  │
 │  └─────────────┘  └──────────────┘  └────────────────────┘  │
 │         │                                      │             │
-│  ┌─────────────┐  ┌──────────────┐            │             │
-│  │ Three.js    │  │ Heatmap/     │            │             │
-│  │ 3D Scene    │  │ Charts       │            │             │
-│  └─────────────┘  └──────────────┘            │             │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────▼──────────┐  │
+│  │ Three.js    │  │ Telemetry    │  │ Recording/Replay  │  │
+│  │ 3D Scene    │  │ HUD          │  │ Controls          │  │
+│  └─────────────┘  └──────────────┘  └───────────────────┘  │
 └───────────────────────────────────────────────│─────────────┘
                                                 │ WebSocket
                                                 │ (50 Hz)
@@ -94,14 +123,19 @@ Frontend runs at: http://localhost:5173
 │  │ - Physics      │  │ - APN      │  │ - WebSocket      │  │
 │  │ - Multi-intcpt │  └────────────┘  │   broadcast      │  │
 │  └────────────────┘         │        └──────────────────┘  │
-│         │            ┌──────▼─────┐                        │
-│  ┌──────▼─────┐      │ Envelope   │                        │
-│  │ Evasion    │      │ Analysis   │                        │
-│  │ - Turn     │      │ - Sweep    │                        │
-│  │ - Weave    │      │ - Heatmap  │                        │
-│  │ - Barrel   │      └────────────┘                        │
-│  │ - Jink     │                                            │
-│  └────────────┘                                            │
+│         │            ┌──────▼─────┐         │              │
+│  ┌──────▼─────┐      │ Intercept  │  ┌──────▼──────────┐  │
+│  │ Evasion    │      │ Geometry   │  │ Recording       │  │
+│  │ - Turn     │      │ - LOS/TTI  │  │ - Capture       │  │
+│  │ - Weave    │      │ - Aspect   │  │ - Playback      │  │
+│  │ - Barrel   │      └────────────┘  │ - Storage       │  │
+│  │ - Jink     │             │        └─────────────────┘  │
+│  └────────────┘      ┌──────▼─────┐                       │
+│                      │ Threat     │                       │
+│                      │ Assessment │                       │
+│                      │ - Scoring  │                       │
+│                      │ - Priority │                       │
+│                      └────────────┘                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,6 +158,39 @@ Frontend runs at: http://localhost:5173
 - Adds target acceleration compensation
 - Better against maneuvering targets
 - Formula: `a = N × Vc × LOS_rate + (N/2) × At`
+
+### Intercept Geometry
+
+Real-time computation of engagement parameters:
+
+**Line-of-Sight (LOS)**: Vector from interceptor to target
+- LOS Range: Distance to target
+- LOS Rate: Rate of change of LOS angle (critical for PN)
+
+**Aspect Angle**: Angle between target velocity and LOS
+- 0° = head-on approach
+- 180° = tail chase
+
+**Antenna Train Angle (ATA)**: Angle from interceptor nose to LOS
+- Determines sensor look angle requirements
+
+**Time-to-Intercept (TTI)**: Estimated time until closest approach
+- Computed from closing velocity and range
+
+### Threat Assessment
+
+Score and prioritize multiple targets:
+
+**Scoring Factors**:
+- Time-to-impact: Closer = higher threat
+- Closing velocity: Faster approach = higher threat
+- Aspect angle: Head-on = higher threat
+
+**Threat Levels**:
+- CRITICAL: Score > 80 (immediate action required)
+- HIGH: Score > 60
+- MEDIUM: Score > 40
+- LOW: Score ≤ 40
 
 ### Monte Carlo Analysis
 
@@ -177,14 +244,18 @@ air-dominance/
 │   │   ├── engine.py       # Simulation loop, physics, multi-interceptor
 │   │   ├── guidance.py     # Guidance laws (PP, PN, APN)
 │   │   ├── evasion.py      # Target evasion maneuvers
+│   │   ├── intercept.py    # Intercept geometry calculations
+│   │   ├── threat.py       # Threat assessment and scoring
+│   │   ├── recording.py    # Simulation recording and replay
 │   │   ├── envelope.py     # Engagement envelope analysis
 │   │   └── monte_carlo.py  # Batch simulation & stats
+│   ├── recordings/         # Saved simulation recordings
 │   └── server.py           # FastAPI + WebSocket server
 ├── frontend/
 │   └── src/
 │       ├── components/
 │       │   ├── Scene.tsx        # Three.js 3D visualization + trails
-│       │   └── ControlPanel.tsx # UI controls, evasion, envelope
+│       │   └── ControlPanel.tsx # Mission control toolbar + HUD
 │       ├── hooks/
 │       │   └── useSimulation.ts # WebSocket + API state management
 │       ├── types.ts             # TypeScript interfaces
@@ -202,15 +273,38 @@ air-dominance/
 | `/runs/stop` | POST | Stop the current run |
 | `/guidance` | GET | List available guidance laws |
 | `/evasion` | GET | List available evasion maneuvers |
+| `/intercept-geometry` | GET | Get current intercept geometry |
+| `/threat-assessment` | GET | Get current threat assessment |
+| `/recordings` | GET | List saved recordings |
+| `/recordings` | POST | Start recording |
+| `/recordings/stop` | POST | Stop recording |
+| `/recordings/{id}` | DELETE | Delete a recording |
+| `/recordings/{id}/replay` | POST | Start replay |
+| `/replay/pause` | POST | Pause replay |
+| `/replay/resume` | POST | Resume replay |
+| `/replay/stop` | POST | Stop replay |
 | `/monte-carlo` | POST | Run Monte Carlo batch analysis |
 | `/monte-carlo/sweep` | POST | Parameter sweep analysis |
 | `/envelope` | POST | Compute engagement envelope |
 | `/ws` | WebSocket | Real-time 50Hz state stream |
 
-## Next: Phase 4
+## Coming Up: Phase 5
 
-- **Optimal Intercept Geometry**: Compute lead-pursuit angles and optimal approach vectors
-- **Threat Assessment**: Score targets by approach angle, speed, and time-to-impact
-- **Weapon-Target Assignment (WTA)**: Multi-interceptor coordination and resource allocation
 - **Sensor Modeling**: Radar detection ranges, look angles, and track quality
-- **Recording & Replay**: Save engagements and replay with different parameters
+  - Detection probability based on range and aspect
+  - Track accuracy degradation with distance
+  - Sensor field-of-view constraints
+- **Weapon-Target Assignment (WTA)**: Multi-interceptor coordination
+  - Optimal assignment of interceptors to targets
+  - Resource allocation under constraints
+  - Cooperative engagement strategies
+- **Multi-Target Scenarios**: Multiple simultaneous threats
+  - Salvo attacks and saturation tactics
+  - Priority-based engagement ordering
+  - Defense resource management
+- **Environmental Effects**: Atmospheric and terrain factors
+  - Wind effects on trajectories
+  - Terrain masking and line-of-sight blockage
+- **AI/ML Integration**: Learning-based guidance and decision making
+  - Reinforcement learning for adaptive guidance
+  - Neural network threat assessment

@@ -19,7 +19,7 @@ import { useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Line, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3 } from '../types';
 
 // Scale factor: sim uses meters, we scale down for visualization
 const SCALE = 0.001; // 1 unit = 1km
@@ -199,12 +199,89 @@ function GradientTrail({ points, color }: { points: THREE.Vector3[]; color: stri
   );
 }
 
+/**
+ * Intercept Point Marker - Shows predicted collision location
+ */
+function InterceptPointMarker({ point, collision }: { point: Vec3; collision: boolean }) {
+  const position: [number, number, number] = [
+    point.x * SCALE,
+    point.z * SCALE,
+    -point.y * SCALE,
+  ];
+
+  return (
+    <group position={position}>
+      {/* Wireframe sphere at intercept point */}
+      <mesh>
+        <sphereGeometry args={[0.12, 16, 16]} />
+        <meshBasicMaterial
+          color={collision ? '#22c55e' : '#f97316'}
+          wireframe
+          transparent
+          opacity={0.8}
+        />
+      </mesh>
+      {/* Inner glow */}
+      <mesh>
+        <sphereGeometry args={[0.06, 12, 12]} />
+        <meshBasicMaterial
+          color={collision ? '#22c55e' : '#f97316'}
+          transparent
+          opacity={0.4}
+        />
+      </mesh>
+      <Text
+        position={[0, 0.25, 0]}
+        fontSize={0.1}
+        color={collision ? '#22c55e' : '#f97316'}
+        anchorX="center"
+      >
+        INTERCEPT
+      </Text>
+    </group>
+  );
+}
+
+/**
+ * Lead Pursuit Line - Shows optimal heading to intercept
+ */
+function LeadPursuitLine({
+  from,
+  to,
+  collision,
+}: {
+  from: Vec3;
+  to: Vec3;
+  collision: boolean;
+}) {
+  const points = useMemo(() => {
+    return [
+      new THREE.Vector3(from.x * SCALE, from.z * SCALE, -from.y * SCALE),
+      new THREE.Vector3(to.x * SCALE, to.z * SCALE, -to.y * SCALE),
+    ];
+  }, [from, to]);
+
+  return (
+    <Line
+      points={points}
+      color={collision ? '#22c55e' : '#f97316'}
+      lineWidth={1.5}
+      dashed
+      dashSize={0.1}
+      gapSize={0.05}
+      opacity={0.6}
+      transparent
+    />
+  );
+}
+
 interface SceneContentProps {
   state: SimStateEvent | null;
   trails: Map<string, THREE.Vector3[]>;
+  interceptGeometry?: InterceptGeometry[] | null;
 }
 
-function SceneContent({ state, trails }: SceneContentProps) {
+function SceneContent({ state, trails, interceptGeometry }: SceneContentProps) {
   const target = state?.entities.find((e) => e.type === 'target');
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
@@ -251,15 +328,38 @@ function SceneContent({ state, trails }: SceneContentProps) {
           colorIndex={idx}
         />
       ))}
+
+      {/* Intercept Geometry Visualization */}
+      {interceptGeometry && interceptGeometry.map((geom) => {
+        const interceptor = interceptors.find((i) => i.id === geom.interceptor_id);
+        if (!interceptor || !geom.intercept_point) return null;
+
+        return (
+          <group key={`geom-${geom.interceptor_id}`}>
+            {/* Intercept point marker */}
+            <InterceptPointMarker
+              point={geom.intercept_point}
+              collision={geom.collision_course}
+            />
+            {/* Lead pursuit line from interceptor to intercept point */}
+            <LeadPursuitLine
+              from={interceptor.position}
+              to={geom.intercept_point}
+              collision={geom.collision_course}
+            />
+          </group>
+        );
+      })}
     </>
   );
 }
 
 interface SimulationSceneProps {
   state: SimStateEvent | null;
+  interceptGeometry?: InterceptGeometry[] | null;
 }
 
-export function SimulationScene({ state }: SimulationSceneProps) {
+export function SimulationScene({ state, interceptGeometry }: SimulationSceneProps) {
   // Maintain trail history
   const trailsRef = useRef<Map<string, THREE.Vector3[]>>(new Map());
 
@@ -306,7 +406,7 @@ export function SimulationScene({ state }: SimulationSceneProps) {
       }}
       style={{ background: '#111827' }}
     >
-      <SceneContent state={state} trails={trailsRef.current} />
+      <SceneContent state={state} trails={trailsRef.current} interceptGeometry={interceptGeometry} />
     </Canvas>
   );
 }

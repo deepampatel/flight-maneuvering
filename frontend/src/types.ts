@@ -158,3 +158,88 @@ export interface EnvelopeResults {
   surface_3d: Surface3D;
   points: EnvelopePoint[];
 }
+
+// Phase 4: Intercept Geometry types
+export interface InterceptGeometry {
+  interceptor_id: string;
+  target_id: string;
+  los_range: number;              // Distance to target (meters)
+  los_rate_magnitude: number;     // Angular rate of LOS (rad/s)
+  aspect_angle: number;           // 0=head-on, 180=tail (degrees)
+  antenna_train_angle: number;    // Angle off interceptor nose (degrees)
+  lead_angle: number;             // Required lead for collision (degrees)
+  collision_course: boolean;      // True if current heading leads to intercept
+  time_to_intercept: number;      // Estimated TTI (seconds), -1 if not closing
+  predicted_miss_distance: number; // Miss at CPA if no maneuver (meters)
+  closing_velocity: number;       // Rate of range decrease (m/s)
+  intercept_point?: Vec3;         // Where collision will occur
+}
+
+export interface InterceptGeometryResponse {
+  timestamp: number;
+  geometries: InterceptGeometry[];
+}
+
+// Phase 4: Threat Assessment types
+export interface ThreatScore {
+  target_id: string;
+  total_score: number;            // 0-100
+  threat_level: 'critical' | 'high' | 'medium' | 'low';
+  time_score: number;             // Component scores (0-1)
+  closing_score: number;
+  aspect_score: number;
+  altitude_score: number;
+  maneuver_score: number;
+  time_to_impact: number;         // seconds
+  closing_velocity: number;       // m/s
+  aspect_angle: number;           // degrees
+  altitude_delta: number;         // meters
+  priority_rank: number;          // 1 = highest priority
+}
+
+export interface ThreatAssessment {
+  timestamp: number;
+  assessor_id: string;            // Which interceptor is assessing
+  threats: ThreatScore[];
+  highest_threat_id: string;
+  engagement_recommendation: 'engage' | 'monitor' | 'ignore';
+}
+
+export interface ThreatAssessmentResponse {
+  assessments: ThreatAssessment[];
+}
+
+// Phase 4: Recording & Replay types
+export interface RecordingMetadata {
+  recording_id: string;
+  created_at: number;
+  scenario_name: string;
+  result: string;
+  final_miss_distance: number;
+  total_sim_time: number;
+  total_ticks: number;
+  guidance: string;
+  evasion: string;
+}
+
+export interface RecordingListResponse {
+  recordings: RecordingMetadata[];
+  total: number;
+}
+
+export interface ReplayConfig {
+  speed_multiplier: number;
+  start_tick: number;
+  end_tick?: number;
+}
+
+export interface ReplayState {
+  recording_id: string;
+  is_playing: boolean;
+  is_paused: boolean;
+  current_tick: number;
+  total_ticks: number;
+  speed_multiplier: number;
+  scenario_name: string;
+  result: string;
+}
