@@ -31,6 +31,11 @@ import type {
   RecordingMetadata,
   ReplayState,
   ReplayConfig,
+  // Phase 5
+  SensorDetection,
+  AssignmentResult,
+  WTAAlgorithm,
+  CostMatrix,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -42,6 +47,8 @@ interface RunOptions {
   navConstant: number;
   evasion?: string;
   numInterceptors?: number;
+  numTargets?: number;  // Phase 5: Multi-target support
+  wtaAlgorithm?: string;  // Phase 5: WTA algorithm selection
 }
 
 interface MonteCarloOptions {
@@ -93,6 +100,15 @@ interface UseSimulationReturn {
   resumeReplay: () => Promise<void>;
   seekReplay: (tick: number) => Promise<void>;
   stopReplay: () => Promise<void>;
+  // Phase 5: Sensor Detections
+  sensorDetections: Record<string, SensorDetection[]> | null;
+  fetchSensorDetections: () => Promise<void>;
+  // Phase 5: WTA
+  wtaAlgorithms: WTAAlgorithm[];
+  assignments: AssignmentResult | null;
+  fetchAssignments: (algorithm?: string) => Promise<void>;
+  costMatrix: CostMatrix | null;
+  fetchCostMatrix: () => Promise<void>;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -110,6 +126,11 @@ export function useSimulation(): UseSimulationReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [recordings, setRecordings] = useState<RecordingMetadata[]>([]);
   const [replayState, setReplayState] = useState<ReplayState | null>(null);
+  // Phase 5: Sensors & WTA
+  const [sensorDetections, setSensorDetections] = useState<Record<string, SensorDetection[]> | null>(null);
+  const [wtaAlgorithms, setWtaAlgorithms] = useState<WTAAlgorithm[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentResult | null>(null);
+  const [costMatrix, setCostMatrix] = useState<CostMatrix | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
 
@@ -128,6 +149,12 @@ export function useSimulation(): UseSimulationReturn {
     fetch(`${API_URL}/evasion`)
       .then((res) => res.json())
       .then((data) => setEvasionTypes(data.evasion_types))
+      .catch(console.error);
+
+    // Phase 5: Fetch WTA algorithms
+    fetch(`${API_URL}/wta/algorithms`)
+      .then((res) => res.json())
+      .then((data) => setWtaAlgorithms(data.algorithms))
       .catch(console.error);
   }, []);
 
@@ -148,6 +175,10 @@ export function useSimulation(): UseSimulationReturn {
 
         if (data.type === 'state') {
           setState(data);
+          // Phase 5: Extract assignments from state event if present
+          if (data.assignments) {
+            setAssignments(data.assignments);
+          }
         } else if (data.type === 'complete') {
           console.log('Simulation complete:', data.result);
         }
@@ -192,6 +223,10 @@ export function useSimulation(): UseSimulationReturn {
   // Start a new simulation run
   const startRun = useCallback(async (options: RunOptions) => {
     setState(null); // Clear previous state
+    // Phase 5: Clear sensor/WTA state
+    setSensorDetections(null);
+    setAssignments(null);
+    setCostMatrix(null);
 
     const response = await fetch(`${API_URL}/runs`, {
       method: 'POST',
@@ -202,6 +237,8 @@ export function useSimulation(): UseSimulationReturn {
         nav_constant: options.navConstant,
         evasion: options.evasion || 'none',
         num_interceptors: options.numInterceptors || 1,
+        num_targets: options.numTargets,  // Phase 5: Multi-target
+        wta_algorithm: options.wtaAlgorithm || 'hungarian',  // Phase 5: WTA algorithm
         real_time: true,
       }),
     });
@@ -441,6 +478,45 @@ export function useSimulation(): UseSimulationReturn {
     refreshRecordings();
   }, [refreshRecordings]);
 
+  // Phase 5: Fetch sensor detections
+  const fetchSensorDetections = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/sensor/detections`);
+      if (response.ok) {
+        const data = await response.json();
+        setSensorDetections(data.detections);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 5: Fetch WTA assignments
+  const fetchAssignments = useCallback(async (algorithm: string = 'greedy_nearest') => {
+    try {
+      const response = await fetch(`${API_URL}/wta/assignments?algorithm=${algorithm}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAssignments(data);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 5: Fetch cost matrix
+  const fetchCostMatrix = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/wta/cost-matrix`);
+      if (response.ok) {
+        const data = await response.json();
+        setCostMatrix(data);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
   return {
     connected,
     state,
@@ -474,5 +550,14 @@ export function useSimulation(): UseSimulationReturn {
     resumeReplay,
     seekReplay,
     stopReplay,
+    // Phase 5: Sensor Detections
+    sensorDetections,
+    fetchSensorDetections,
+    // Phase 5: WTA
+    wtaAlgorithms,
+    assignments,
+    fetchAssignments,
+    costMatrix,
+    fetchCostMatrix,
   };
 }

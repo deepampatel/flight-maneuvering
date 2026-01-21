@@ -21,6 +21,7 @@ from typing import Set, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 
 from sim.engine import SimEngine, SimConfig, load_scenario, SCENARIOS
 from sim.vector import Vec3
@@ -28,13 +29,18 @@ from sim.guidance import GuidanceType, GuidanceParams, create_guidance_function
 from sim.monte_carlo import MonteCarloConfig, run_monte_carlo, parameter_sweep
 from sim.evasion import EvasionType, EvasionConfig
 from sim.envelope import EnvelopeConfig, compute_engagement_envelope
-from sim.intercept import compute_intercept_geometry, compute_all_geometries
+from sim.intercept import compute_intercept_geometry, compute_all_geometries, compute_all_geometries_multi
 from sim.threat import (
     ThreatWeights, compute_threat_score, assess_all_threats, quick_threat_assessment
 )
 from sim.recording import (
     RecordingManager, ReplayEngine, ReplayConfig,
     EngagementRecording, get_recording_manager
+)
+from sim.sensor import SensorModel, SensorConfig, create_sensor_state
+from sim.assignment import (
+    WTAAlgorithm, compute_assignment, compute_cost_matrix,
+    greedy_nearest_assignment, greedy_threat_assignment, hungarian_assignment
 )
 
 
@@ -106,6 +112,10 @@ class RunConfig(BaseModel):
     nav_constant: float = 4.0
     evasion: str = "none"  # none, constant_turn, weave, barrel_roll, random_jink
     num_interceptors: int = 1  # Number of interceptors (unlimited)
+    # Phase 5: Multi-target support
+    num_targets: Optional[int] = None  # Override scenario's num_targets if set
+    # Phase 5: WTA algorithm
+    wta_algorithm: str = "hungarian"  # greedy_nearest, greedy_threat, hungarian, round_robin
 
 
 class MonteCarloRequest(BaseModel):
@@ -191,6 +201,23 @@ class RecordingStartRequest(BaseModel):
     scenario_name: Optional[str] = None
 
 
+# Phase 5: Sensor Configuration
+class SensorConfigRequest(BaseModel):
+    """Request body for sensor configuration."""
+    max_range: float = 10000.0
+    min_range: float = 100.0
+    field_of_view: float = 120.0
+    detection_probability: float = 0.95
+    range_noise_std: float = 50.0
+    angle_noise_std: float = 1.0
+
+
+# Phase 5: WTA Configuration
+class WTAConfigRequest(BaseModel):
+    """Request body for WTA algorithm configuration."""
+    algorithm: str = "greedy_nearest"  # greedy_nearest, greedy_threat, hungarian, round_robin
+
+
 # ============================================================
 # FastAPI App
 # ============================================================
@@ -245,6 +272,9 @@ async def list_scenarios():
             "name": name,
             "description": info["description"],
             "evasion": info.get("evasion", "none").value if hasattr(info.get("evasion", "none"), "value") else "none",
+            # Phase 5: Include multi-target info
+            "num_targets": info.get("num_targets", 1),
+            "target_spacing": info.get("target_spacing", 300.0),
         }
         for name, info in SCENARIOS.items()
     }
@@ -304,6 +334,12 @@ async def start_run(config: RunConfig):
     else:
         evasion_type = EvasionType.NONE
 
+    # Determine WTA algorithm
+    try:
+        wta_algorithm = WTAAlgorithm(config.wta_algorithm)
+    except ValueError:
+        wta_algorithm = WTAAlgorithm.HUNGARIAN
+
     # Create engine with config
     sim_config = SimConfig(
         dt=config.dt,
@@ -315,6 +351,7 @@ async def start_run(config: RunConfig):
         config=sim_config,
         guidance=guidance,
         evasion_type=evasion_type,
+        wta_algorithm=wta_algorithm,
     )
 
     # Register broadcast handler
@@ -332,13 +369,18 @@ async def start_run(config: RunConfig):
             )
     current_engine.on_event(recording_handler)
 
-    # Setup scenario
+    # Setup scenario with multi-target support (Phase 5)
+    num_targets = config.num_targets if config.num_targets else scenario.get("num_targets", 1)
+    target_spacing = scenario.get("target_spacing", 300.0)
+
     current_engine.setup_scenario(
         target_start=scenario["target_start"],
         target_velocity=scenario["target_velocity"],
         interceptor_start=scenario["interceptor_start"],
         interceptor_velocity=scenario["interceptor_velocity"],
         num_interceptors=config.num_interceptors,
+        num_targets=num_targets,
+        target_spacing=target_spacing,
     )
 
     # Start simulation in background
@@ -509,15 +551,25 @@ async def get_intercept_geometry():
     - Aspect and antenna train angles
     - Lead angle and collision course status
     - Time to intercept prediction
+
+    Phase 5: Updated to support multiple targets.
     """
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
 
     state = current_engine.state
-    geometries = compute_all_geometries(state.interceptors, state.target)
+
+    # Phase 5: Use multi-target geometry computation
+    if len(state.targets) > 1:
+        geometries = compute_all_geometries_multi(state.interceptors, state.targets)
+    else:
+        # Backward compatible for single target
+        geometries = compute_all_geometries(state.interceptors, state.target)
 
     return {
         "timestamp": state.sim_time,
+        "num_targets": len(state.targets),
+        "num_interceptors": len(state.interceptors),
         "geometries": [g.to_dict() for g in geometries]
     }
 
@@ -533,6 +585,8 @@ async def get_threat_assessment(interceptor_id: str = None):
 
     Returns threat scores for all targets ranked by priority.
     Optionally filter by interceptor_id.
+
+    Phase 5: Updated to support multiple targets.
     """
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
@@ -548,17 +602,23 @@ async def get_threat_assessment(interceptor_id: str = None):
             raise HTTPException(status_code=404, detail=f"Interceptor {interceptor_id} not found")
 
     for interceptor in interceptors:
-        # Compute geometry first
-        geometry = compute_intercept_geometry(interceptor, state.target)
-        # Then threat assessment
+        # Compute geometry for all targets
+        geometries = [
+            compute_intercept_geometry(interceptor, target)
+            for target in state.targets
+        ]
+        # Then threat assessment for all targets
         assessment = assess_all_threats(
             interceptor,
-            [state.target],
-            [geometry]
+            state.targets,
+            geometries
         )
         assessments.append(assessment.to_dict())
 
-    return {"assessments": assessments}
+    return {
+        "num_targets": len(state.targets),
+        "assessments": assessments
+    }
 
 
 @app.post("/threat-assessment/configure")
@@ -801,6 +861,161 @@ async def get_replay_state():
         return current_replay_engine.get_state()
 
     return {"status": "no_replay_active"}
+
+
+# ============================================================
+# Phase 5: Sensor Endpoints
+# ============================================================
+
+@app.get("/sensor/config")
+async def get_sensor_config():
+    """Get current sensor configuration."""
+    config = SensorConfig()
+    return {
+        "max_range": config.max_range,
+        "min_range": config.min_range,
+        "field_of_view": config.field_of_view,
+        "detection_probability": config.detection_probability,
+        "range_noise_std": config.range_noise_std,
+        "angle_noise_std": config.angle_noise_std,
+        "update_rate": config.update_rate,
+    }
+
+
+@app.get("/sensor/detections")
+async def get_sensor_detections():
+    """
+    Get simulated sensor detections for all interceptors.
+
+    Returns what each interceptor's sensor would detect given current state.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    sensor = SensorModel()  # Use default config
+    detections_by_interceptor = {}
+
+    for interceptor in state.interceptors:
+        detections = []
+        for target in state.targets:
+            detection = sensor.compute_detection(
+                sensor_pos=interceptor.position,
+                sensor_vel=interceptor.velocity,
+                target=target,
+                sim_time=state.sim_time
+            )
+            detections.append({
+                "target_id": detection.target_id,
+                "detected": detection.detected,
+                "in_fov": detection.in_fov,
+                "true_range": round(detection.true_range, 1),
+                "measured_range": round(detection.measured_range, 1),
+                "bearing": round(detection.bearing, 1),
+                "elevation": round(detection.elevation, 1),
+                "confidence": round(detection.confidence, 3),
+                "estimated_position": detection.estimated_position.to_dict() if detection.detected else None,
+            })
+        detections_by_interceptor[interceptor.id] = detections
+
+    return {
+        "timestamp": state.sim_time,
+        "detections": detections_by_interceptor
+    }
+
+
+# ============================================================
+# Phase 5: Weapon-Target Assignment Endpoints
+# ============================================================
+
+@app.get("/wta/algorithms")
+async def list_wta_algorithms():
+    """List available WTA algorithms."""
+    return {
+        "algorithms": [
+            {"id": "greedy_nearest", "name": "Greedy Nearest", "description": "Each interceptor takes nearest unassigned target"},
+            {"id": "greedy_threat", "name": "Greedy Threat", "description": "Prioritize highest-threat targets first"},
+            {"id": "hungarian", "name": "Hungarian (Optimal)", "description": "Optimal assignment minimizing total cost"},
+            {"id": "round_robin", "name": "Round Robin", "description": "Simple sequential assignment"},
+        ]
+    }
+
+
+@app.get("/wta/assignments")
+async def get_current_assignments(algorithm: str = "greedy_nearest"):
+    """
+    Get weapon-target assignments for current simulation state.
+
+    Args:
+        algorithm: WTA algorithm to use (greedy_nearest, greedy_threat, hungarian, round_robin)
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+
+    # Validate algorithm
+    try:
+        wta_algorithm = WTAAlgorithm(algorithm)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown algorithm: {algorithm}")
+
+    # Compute geometries and threats for better assignment
+    geometries = compute_all_geometries_multi(state.interceptors, state.targets)
+
+    threats = []
+    for interceptor in state.interceptors:
+        interceptor_geos = [g for g in geometries if g.interceptor_id == interceptor.id]
+        assessment = assess_all_threats(interceptor, state.targets, interceptor_geos)
+        threats.extend(assessment.threats)
+
+    # Compute assignment
+    result = compute_assignment(
+        state.interceptors,
+        state.targets,
+        wta_algorithm,
+        geometries,
+        threats
+    )
+
+    return result.to_dict()
+
+
+@app.post("/wta/configure")
+async def configure_wta(config: WTAConfigRequest):
+    """Configure WTA algorithm for simulation."""
+    try:
+        WTAAlgorithm(config.algorithm)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown algorithm: {config.algorithm}")
+
+    return {
+        "status": "ok",
+        "algorithm": config.algorithm
+    }
+
+
+@app.get("/wta/cost-matrix")
+async def get_cost_matrix():
+    """
+    Get the cost matrix for current interceptor-target assignments.
+
+    Useful for visualization and debugging WTA decisions.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    geometries = compute_all_geometries_multi(state.interceptors, state.targets)
+
+    cost_matrix = compute_cost_matrix(state.interceptors, state.targets, geometries)
+
+    return {
+        "timestamp": state.sim_time,
+        "interceptor_ids": [i.id for i in state.interceptors],
+        "target_ids": [t.id for t in state.targets],
+        "cost_matrix": [[round(c, 3) for c in row] for row in cost_matrix]
+    }
 
 
 # ============================================================

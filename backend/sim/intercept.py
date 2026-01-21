@@ -30,7 +30,7 @@ KEY CONCEPTS:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import math
 import numpy as np
 
@@ -444,11 +444,11 @@ def compute_all_geometries(
     dt: float = 0.02
 ) -> list[InterceptGeometry]:
     """
-    Compute intercept geometry for all interceptor-target pairs.
+    Compute intercept geometry for all interceptor-target pairs (single target).
 
     Args:
         interceptors: List of interceptor entities
-        target: Target entity
+        target: Target entity (single)
         dt: Time step
 
     Returns:
@@ -458,3 +458,56 @@ def compute_all_geometries(
         compute_intercept_geometry(interceptor, target, dt)
         for interceptor in interceptors
     ]
+
+
+def compute_all_geometries_multi(
+    interceptors: list[Entity],
+    targets: list[Entity],
+    dt: float = 0.02
+) -> list[InterceptGeometry]:
+    """
+    Compute intercept geometry for all interceptor-target pair combinations.
+
+    Phase 5: Multi-target support.
+
+    Args:
+        interceptors: List of interceptor entities
+        targets: List of target entities
+        dt: Time step
+
+    Returns:
+        List of InterceptGeometry, one per (interceptor, target) pair.
+        Length = len(interceptors) * len(targets)
+    """
+    geometries = []
+    for interceptor in interceptors:
+        for target in targets:
+            geometries.append(compute_intercept_geometry(interceptor, target, dt))
+    return geometries
+
+
+def get_geometries_for_interceptor(
+    interceptor_id: str,
+    geometries: list[InterceptGeometry]
+) -> list[InterceptGeometry]:
+    """Filter geometries to those for a specific interceptor."""
+    return [g for g in geometries if g.interceptor_id == interceptor_id]
+
+
+def get_geometries_for_target(
+    target_id: str,
+    geometries: list[InterceptGeometry]
+) -> list[InterceptGeometry]:
+    """Filter geometries to those for a specific target."""
+    return [g for g in geometries if g.target_id == target_id]
+
+
+def get_nearest_target_geometry(
+    interceptor_id: str,
+    geometries: list[InterceptGeometry]
+) -> Optional[InterceptGeometry]:
+    """Get the geometry for the nearest target to a specific interceptor."""
+    interceptor_geos = get_geometries_for_interceptor(interceptor_id, geometries)
+    if not interceptor_geos:
+        return None
+    return min(interceptor_geos, key=lambda g: g.los_range)

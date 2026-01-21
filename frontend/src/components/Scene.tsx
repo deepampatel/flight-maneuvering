@@ -15,11 +15,11 @@
  * - Enhanced trail visualization
  */
 
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Line, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent, InterceptGeometry, Vec3 } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult } from '../types';
 
 // Scale factor: sim uses meters, we scale down for visualization
 const SCALE = 0.001; // 1 unit = 1km
@@ -47,16 +47,41 @@ const INTERCEPTOR_EMISSIVE = [
   '#0f766e',
 ];
 
+// Phase 5: Color palette for multiple targets (shades of red/orange)
+const TARGET_COLORS = [
+  '#ef4444', // Red
+  '#f97316', // Orange
+  '#dc2626', // Dark red
+  '#ea580c', // Dark orange
+];
+
+const TARGET_EMISSIVE = [
+  '#991b1b',
+  '#c2410c',
+  '#7f1d1d',
+  '#9a3412',
+];
+
 interface EntityProps {
   entity: EntityState;
   trail: THREE.Vector3[];
 }
 
+interface TargetProps extends EntityProps {
+  colorIndex?: number;
+  isIntercepted?: boolean;
+}
+
 /**
- * Target visualization - a red sphere
+ * Target visualization - a sphere with color based on index
+ * Phase 5: Supports multiple targets with distinct colors
  */
-function Target({ entity, trail }: EntityProps) {
+function Target({ entity, trail, colorIndex = 0, isIntercepted = false }: TargetProps) {
   const meshRef = useRef<THREE.Mesh>(null);
+
+  // Get color for this target
+  const color = TARGET_COLORS[colorIndex % TARGET_COLORS.length];
+  const emissive = TARGET_EMISSIVE[colorIndex % TARGET_EMISSIVE.length];
 
   // Convert sim coordinates to Three.js coordinates
   const position: [number, number, number] = [
@@ -70,22 +95,34 @@ function Target({ entity, trail }: EntityProps) {
       {/* Target sphere */}
       <mesh ref={meshRef} position={position}>
         <sphereGeometry args={[0.15, 16, 16]} />
-        <meshStandardMaterial color="#ef4444" emissive="#991b1b" emissiveIntensity={0.3} />
+        <meshStandardMaterial
+          color={isIntercepted ? '#6b7280' : color}
+          emissive={isIntercepted ? '#374151' : emissive}
+          emissiveIntensity={isIntercepted ? 0.1 : 0.3}
+          opacity={isIntercepted ? 0.5 : 1}
+          transparent={isIntercepted}
+        />
       </mesh>
 
       {/* Label */}
       <Text
         position={[position[0], position[1] + 0.3, position[2]]}
-        fontSize={0.15}
-        color="#ef4444"
+        fontSize={0.12}
+        color={isIntercepted ? '#6b7280' : color}
         anchorX="center"
       >
-        TARGET
+        {entity.id}
       </Text>
 
-      {/* Trail */}
+      {/* Trail - always visible, brighter when intercepted for visibility */}
       {trail.length > 1 && (
-        <Line points={trail} color="#ef4444" lineWidth={2} opacity={0.5} transparent />
+        <Line
+          points={trail}
+          color={isIntercepted ? '#9ca3af' : color}
+          lineWidth={3}
+          opacity={0.8}
+          transparent
+        />
       )}
     </group>
   );
@@ -179,12 +216,12 @@ function GradientTrail({ points, color }: { points: THREE.Vector3[]; color: stri
 
   return (
     <group>
-      {/* Main trail line */}
+      {/* Main trail line - brighter for visibility */}
       <Line
         points={points}
         color={color}
-        lineWidth={2}
-        opacity={0.6}
+        lineWidth={3}
+        opacity={0.8}
         transparent
       />
 
@@ -275,15 +312,83 @@ function LeadPursuitLine({
   );
 }
 
+/**
+ * Standalone trail component - renders trails even when entities are gone
+ * This ensures flight paths remain visible after simulation ends
+ */
+function PersistentTrail({
+  points,
+  isTarget,
+  colorIndex,
+}: {
+  points: THREE.Vector3[];
+  isTarget: boolean;
+  colorIndex: number;
+}) {
+  if (points.length < 2) return null;
+
+  const color = isTarget
+    ? TARGET_COLORS[colorIndex % TARGET_COLORS.length]
+    : INTERCEPTOR_COLORS[colorIndex % INTERCEPTOR_COLORS.length];
+
+  return (
+    <group>
+      <Line
+        points={points}
+        color={color}
+        lineWidth={2}
+        opacity={0.7}
+        transparent
+      />
+      {/* End point marker */}
+      <mesh position={points[points.length - 1]}>
+        <sphereGeometry args={[0.08, 12, 12]} />
+        <meshBasicMaterial color={color} opacity={0.8} transparent />
+      </mesh>
+      {/* Start point marker */}
+      <mesh position={points[0]}>
+        <sphereGeometry args={[0.05, 8, 8]} />
+        <meshBasicMaterial color={color} opacity={0.5} transparent />
+      </mesh>
+    </group>
+  );
+}
+
 interface SceneContentProps {
   state: SimStateEvent | null;
   trails: Map<string, THREE.Vector3[]>;
   interceptGeometry?: InterceptGeometry[] | null;
+  assignments?: AssignmentResult | null;
 }
 
-function SceneContent({ state, trails, interceptGeometry }: SceneContentProps) {
-  const target = state?.entities.find((e) => e.type === 'target');
+function SceneContent({ state, trails, interceptGeometry, assignments }: SceneContentProps) {
+  // Phase 5: Support multiple targets
+  const targets = state?.entities.filter((e) => e.type === 'target') || [];
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
+
+  // Get all entity IDs currently in state
+  const currentEntityIds = new Set(state?.entities.map((e) => e.id) || []);
+
+  // Track which targets have been intercepted
+  const interceptedTargetIds = new Set(
+    state?.intercepted_pairs?.map((pair) => pair[1]) || []
+  );
+
+  // Track which interceptors have hit their target
+  const interceptedInterceptorIds = new Set(
+    state?.intercepted_pairs?.map((pair) => pair[0]) || []
+  );
+
+  // Build a map of interceptor -> assigned target for filtering geometry
+  const assignmentMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (assignments?.assignments) {
+      for (const a of assignments.assignments) {
+        map.set(a.interceptor_id, a.target_id);
+      }
+    }
+    return map;
+  }, [assignments]);
 
   return (
     <>
@@ -316,8 +421,16 @@ function SceneContent({ state, trails, interceptGeometry }: SceneContentProps) {
       {/* Axis helper for orientation */}
       <axesHelper args={[2]} />
 
-      {/* Target */}
-      {target && <Target entity={target} trail={trails.get(target.id) || []} />}
+      {/* All Targets - Phase 5 multi-target support */}
+      {targets.map((target, idx) => (
+        <Target
+          key={target.id}
+          entity={target}
+          trail={trails.get(target.id) || []}
+          colorIndex={idx}
+          isIntercepted={interceptedTargetIds.has(target.id)}
+        />
+      ))}
 
       {/* All Interceptors */}
       {interceptors.map((interceptor, idx) => (
@@ -329,13 +442,43 @@ function SceneContent({ state, trails, interceptGeometry }: SceneContentProps) {
         />
       ))}
 
-      {/* Intercept Geometry Visualization */}
+      {/* Persistent trails - render trails for entities not currently in state
+          This ensures flight paths remain visible after simulation ends */}
+      {Array.from(trails.entries()).map(([entityId, points]) => {
+        // Skip if entity is currently being rendered (its component handles the trail)
+        if (currentEntityIds.has(entityId)) return null;
+
+        // Determine if this was a target or interceptor based on ID prefix
+        const isTarget = entityId.startsWith('T');
+        const colorIndex = parseInt(entityId.replace(/\D/g, ''), 10) - 1 || 0;
+
+        return (
+          <PersistentTrail
+            key={`trail-${entityId}`}
+            points={points}
+            isTarget={isTarget}
+            colorIndex={colorIndex}
+          />
+        );
+      })}
+
+      {/* Intercept Geometry Visualization - Only show for assigned targets */}
       {interceptGeometry && interceptGeometry.map((geom) => {
         const interceptor = interceptors.find((i) => i.id === geom.interceptor_id);
         if (!interceptor || !geom.intercept_point) return null;
 
+        // Skip interceptors that have already hit their target
+        if (interceptedInterceptorIds.has(geom.interceptor_id)) return null;
+
+        // Skip intercepted targets
+        if (interceptedTargetIds.has(geom.target_id)) return null;
+
+        // Phase 5: Only show geometry for assigned target (not all targets)
+        const assignedTargetId = assignmentMap.get(geom.interceptor_id);
+        if (assignedTargetId && geom.target_id !== assignedTargetId) return null;
+
         return (
-          <group key={`geom-${geom.interceptor_id}`}>
+          <group key={`geom-${geom.interceptor_id}-${geom.target_id}`}>
             {/* Intercept point marker */}
             <InterceptPointMarker
               point={geom.intercept_point}
@@ -357,44 +500,70 @@ function SceneContent({ state, trails, interceptGeometry }: SceneContentProps) {
 interface SimulationSceneProps {
   state: SimStateEvent | null;
   interceptGeometry?: InterceptGeometry[] | null;
+  assignments?: AssignmentResult | null;
 }
 
-export function SimulationScene({ state, interceptGeometry }: SimulationSceneProps) {
-  // Maintain trail history
-  const trailsRef = useRef<Map<string, THREE.Vector3[]>>(new Map());
+export function SimulationScene({ state, interceptGeometry, assignments }: SimulationSceneProps) {
+  // Maintain trail history with state to trigger re-renders
+  const [trails, setTrails] = useState<Map<string, THREE.Vector3[]>>(new Map());
+  // Track current run_id to know when to clear trails
+  const currentRunIdRef = useRef<string | null>(null);
 
   // Update trails when state changes
-  useMemo(() => {
+  useEffect(() => {
     if (!state) {
-      trailsRef.current.clear();
+      // Don't clear trails when state is null - preserve them for viewing
       return;
     }
 
-    for (const entity of state.entities) {
-      const pos = new THREE.Vector3(
-        entity.position.x * SCALE,
-        entity.position.z * SCALE,
-        -entity.position.y * SCALE
-      );
-
-      let trail = trailsRef.current.get(entity.id);
-      if (!trail) {
-        trail = [];
-        trailsRef.current.set(entity.id, trail);
+    setTrails(prevTrails => {
+      // Clear trails only when a NEW run starts (different run_id)
+      if (state.run_id !== currentRunIdRef.current) {
+        currentRunIdRef.current = state.run_id;
+        // Start fresh with empty Map for new run
+        const freshTrails = new Map<string, THREE.Vector3[]>();
+        for (const entity of state.entities) {
+          const pos = new THREE.Vector3(
+            entity.position.x * SCALE,
+            entity.position.z * SCALE,
+            -entity.position.y * SCALE
+          );
+          freshTrails.set(entity.id, [pos]);
+        }
+        return freshTrails;
       }
 
-      // Add point if moved enough (avoid cluttering with tiny movements)
-      const lastPoint = trail[trail.length - 1];
-      if (!lastPoint || pos.distanceTo(lastPoint) > 0.05) {
-        trail.push(pos);
+      // Create a new Map with NEW arrays (immutable update for React)
+      const newTrails = new Map<string, THREE.Vector3[]>();
 
-        // Limit trail length
-        if (trail.length > 500) {
-          trail.shift();
+      for (const entity of state.entities) {
+        const pos = new THREE.Vector3(
+          entity.position.x * SCALE,
+          entity.position.z * SCALE,
+          -entity.position.y * SCALE
+        );
+
+        const existingTrail = prevTrails.get(entity.id) || [];
+        const lastPoint = existingTrail[existingTrail.length - 1];
+
+        // Add point if moved enough (avoid cluttering with tiny movements)
+        if (!lastPoint || pos.distanceTo(lastPoint) > 0.05) {
+          // Create NEW array with new point (immutable)
+          const newTrail = [...existingTrail, pos];
+          // Limit trail length
+          if (newTrail.length > 500) {
+            newTrail.shift();
+          }
+          newTrails.set(entity.id, newTrail);
+        } else {
+          // No change needed, keep existing trail
+          newTrails.set(entity.id, existingTrail);
         }
       }
-    }
-  }, [state?.tick]);
+
+      return newTrails;
+    });
+  }, [state?.tick, state?.run_id]);
 
   return (
     <Canvas
@@ -406,7 +575,7 @@ export function SimulationScene({ state, interceptGeometry }: SimulationScenePro
       }}
       style={{ background: '#111827' }}
     >
-      <SceneContent state={state} trails={trailsRef.current} interceptGeometry={interceptGeometry} />
+      <SceneContent state={state} trails={trails} interceptGeometry={interceptGeometry} assignments={assignments} />
     </Canvas>
   );
 }

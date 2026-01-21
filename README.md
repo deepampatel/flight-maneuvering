@@ -2,6 +2,33 @@
 
 A real-time air intercept simulation sandbox for learning guidance, control, and autonomy concepts.
 
+## Phase 5: Multi-Target, Sensors & Weapon-Target Assignment ✓
+
+Building on Phase 4, this phase adds multi-target engagement capabilities:
+
+- **Multi-Target Support**: Engage multiple simultaneous threats
+  - 1-4 targets per scenario
+  - Each target tracked independently
+  - Intercepts tracked per target-interceptor pair
+  - Pre-built multi-target scenarios (2, 3, 4 targets)
+- **Sensor Modeling**: Realistic detection and tracking
+  - Range-limited detection (configurable max range)
+  - Field-of-view constraints (120° default)
+  - Detection probability based on range and aspect
+  - Measurement noise (range and angle)
+  - Track quality and confidence scoring
+- **Weapon-Target Assignment (WTA)**: Automated interceptor allocation
+  - Greedy Nearest: Each interceptor takes closest target
+  - Greedy Threat: Prioritize highest-threat targets
+  - Hungarian (Optimal): Globally optimal assignment
+  - Real-time reassignment as situation evolves
+  - Assignment visualization in HUD
+- **Enhanced UI**: Multi-target controls and status
+  - Target count slider (1-4)
+  - WTA algorithm selector
+  - Kill tracking panel
+  - Assignment display
+
 ## Phase 4: Intercept Geometry, Threat Assessment & Recording ✓
 
 Building on Phase 3, this phase adds tactical decision support and mission replay:
@@ -241,14 +268,16 @@ air-dominance/
 │   ├── sim/
 │   │   ├── vector.py       # 3D vector math
 │   │   ├── entities.py     # Target & Interceptor models
-│   │   ├── engine.py       # Simulation loop, physics, multi-interceptor
+│   │   ├── engine.py       # Simulation loop, physics, multi-target/interceptor
 │   │   ├── guidance.py     # Guidance laws (PP, PN, APN)
 │   │   ├── evasion.py      # Target evasion maneuvers
 │   │   ├── intercept.py    # Intercept geometry calculations
 │   │   ├── threat.py       # Threat assessment and scoring
 │   │   ├── recording.py    # Simulation recording and replay
 │   │   ├── envelope.py     # Engagement envelope analysis
-│   │   └── monte_carlo.py  # Batch simulation & stats
+│   │   ├── monte_carlo.py  # Batch simulation & stats
+│   │   ├── sensor.py       # Sensor modeling (Phase 5)
+│   │   └── assignment.py   # Weapon-Target Assignment (Phase 5)
 │   ├── recordings/         # Saved simulation recordings
 │   └── server.py           # FastAPI + WebSocket server
 ├── frontend/
@@ -258,7 +287,7 @@ air-dominance/
 │       │   └── ControlPanel.tsx # Mission control toolbar + HUD
 │       ├── hooks/
 │       │   └── useSimulation.ts # WebSocket + API state management
-│       ├── types.ts             # TypeScript interfaces
+│       ├── types.ts             # TypeScript interfaces (Phase 5: WTA, Sensor types)
 │       └── App.tsx
 └── README.md
 ```
@@ -267,7 +296,7 @@ air-dominance/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/scenarios` | GET | List preset scenarios (including evasive) |
+| `/scenarios` | GET | List preset scenarios (including multi-target) |
 | `/runs` | POST | Start a simulation run |
 | `/runs/current` | GET | Get current run status |
 | `/runs/stop` | POST | Stop the current run |
@@ -275,6 +304,11 @@ air-dominance/
 | `/evasion` | GET | List available evasion maneuvers |
 | `/intercept-geometry` | GET | Get current intercept geometry |
 | `/threat-assessment` | GET | Get current threat assessment |
+| `/sensor/config` | GET | Get sensor configuration |
+| `/sensor/detections` | GET | Get current sensor detections |
+| `/wta/algorithms` | GET | List WTA algorithms |
+| `/wta/assignments` | GET | Get current WTA assignments |
+| `/wta/cost-matrix` | GET | Get assignment cost matrix |
 | `/recordings` | GET | List saved recordings |
 | `/recordings` | POST | Start recording |
 | `/recordings/stop` | POST | Stop recording |
@@ -288,23 +322,21 @@ air-dominance/
 | `/envelope` | POST | Compute engagement envelope |
 | `/ws` | WebSocket | Real-time 50Hz state stream |
 
-## Coming Up: Phase 5
+## Coming Up: Phase 6
 
-- **Sensor Modeling**: Radar detection ranges, look angles, and track quality
-  - Detection probability based on range and aspect
-  - Track accuracy degradation with distance
-  - Sensor field-of-view constraints
-- **Weapon-Target Assignment (WTA)**: Multi-interceptor coordination
-  - Optimal assignment of interceptors to targets
-  - Resource allocation under constraints
-  - Cooperative engagement strategies
-- **Multi-Target Scenarios**: Multiple simultaneous threats
-  - Salvo attacks and saturation tactics
-  - Priority-based engagement ordering
-  - Defense resource management
 - **Environmental Effects**: Atmospheric and terrain factors
   - Wind effects on trajectories
   - Terrain masking and line-of-sight blockage
+  - Weather effects on sensor performance
 - **AI/ML Integration**: Learning-based guidance and decision making
   - Reinforcement learning for adaptive guidance
   - Neural network threat assessment
+  - Learned evasion patterns
+- **Advanced Sensor Fusion**: Combine multiple sensor inputs
+  - Track-to-track fusion
+  - Data association
+  - Kalman filtering for state estimation
+- **Cooperative Engagement**: Multi-platform coordination
+  - Distributed fire control
+  - Hand-off between platforms
+  - Engagement zones

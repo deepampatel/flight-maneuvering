@@ -41,6 +41,10 @@ function App() {
     pauseReplay,
     resumeReplay,
     stopReplay,
+    // Phase 5
+    wtaAlgorithms,
+    assignments,
+    fetchAssignments,
   } = useSimulation();
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -84,13 +88,17 @@ function App() {
             onStopReplay={stopReplay}
             showAdvanced={showAdvanced}
             onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+            // Phase 5
+            wtaAlgorithms={wtaAlgorithms}
+            assignments={assignments}
+            onFetchAssignments={fetchAssignments}
           />
         </div>
       </header>
 
       <main className="app-main">
         <div className="scene-container">
-          <SimulationScene state={state} interceptGeometry={interceptGeometry} />
+          <SimulationScene state={state} interceptGeometry={interceptGeometry} assignments={assignments} />
         </div>
       </main>
     </div>

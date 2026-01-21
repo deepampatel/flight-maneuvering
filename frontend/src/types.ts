@@ -20,18 +20,6 @@ export interface EntityState {
   speed: number;
 }
 
-export interface SimStateEvent {
-  type: 'state';
-  run_id: string;
-  ts: number;
-  sim_time: number;
-  tick: number;
-  status: 'ready' | 'running' | 'paused' | 'completed';
-  result: 'pending' | 'intercept' | 'timeout' | 'missed';
-  entities: EntityState[];
-  miss_distance: number;
-}
-
 export interface SimCompleteEvent {
   type: 'complete';
   run_id: string;
@@ -43,12 +31,6 @@ export interface SimCompleteEvent {
 }
 
 export type SimEvent = SimStateEvent | SimCompleteEvent;
-
-export interface Scenario {
-  name: string;
-  description: string;
-  evasion?: string;
-}
 
 export interface EvasionType {
   id: string;
@@ -242,4 +224,89 @@ export interface ReplayState {
   speed_multiplier: number;
   scenario_name: string;
   result: string;
+}
+
+// Phase 5: Multi-Target Support
+export interface SimStateEvent {
+  type: 'state';
+  run_id: string;
+  ts: number;
+  sim_time: number;
+  tick: number;
+  status: 'ready' | 'running' | 'paused' | 'completed';
+  result: 'pending' | 'intercept' | 'timeout' | 'missed';
+  entities: EntityState[];
+  miss_distance: number;
+  // Phase 5 additions
+  intercepting_id?: string;
+  intercepted_target_id?: string;
+  intercepted_pairs?: [string, string][];
+  assignments?: AssignmentResult;  // WTA assignments included in state
+}
+
+// Phase 5: Sensor Types
+export interface SensorConfig {
+  max_range: number;
+  min_range: number;
+  field_of_view: number;
+  detection_probability: number;
+  range_noise_std: number;
+  angle_noise_std: number;
+  update_rate: number;
+}
+
+export interface SensorDetection {
+  target_id: string;
+  detected: boolean;
+  in_fov: boolean;
+  true_range: number;
+  measured_range: number;
+  bearing: number;
+  elevation: number;
+  confidence: number;
+  estimated_position?: Vec3;
+}
+
+export interface SensorDetectionsResponse {
+  timestamp: number;
+  detections: Record<string, SensorDetection[]>;  // interceptor_id -> detections
+}
+
+// Phase 5: WTA (Weapon-Target Assignment) Types
+export interface WTAAlgorithm {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface Assignment {
+  interceptor_id: string;
+  target_id: string;
+  cost: number;
+  reason: string;
+}
+
+export interface AssignmentResult {
+  assignments: Assignment[];
+  total_cost: number;
+  algorithm: string;
+  unassigned_interceptors: string[];
+  unassigned_targets: string[];
+  timestamp: number;
+}
+
+export interface CostMatrix {
+  timestamp: number;
+  interceptor_ids: string[];
+  target_ids: string[];
+  cost_matrix: number[][];
+}
+
+// Extended Scenario type for Phase 5
+export interface Scenario {
+  name: string;
+  description: string;
+  evasion?: string;
+  num_targets?: number;
+  target_spacing?: number;
 }

@@ -19,6 +19,9 @@ import type {
   ThreatAssessment,
   RecordingMetadata,
   ReplayState,
+  // Phase 5
+  WTAAlgorithm,
+  AssignmentResult,
 } from '../types';
 
 interface ControlPanelProps {
@@ -33,6 +36,8 @@ interface ControlPanelProps {
     navConstant: number;
     evasion: string;
     numInterceptors: number;
+    numTargets?: number;  // Phase 5
+    wtaAlgorithm?: string;  // Phase 5
   }) => void;
   onStop: () => void;
   onRunMonteCarlo: (options: {
@@ -70,6 +75,10 @@ interface ControlPanelProps {
   onStopReplay: () => void;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
+  // Phase 5: WTA
+  wtaAlgorithms: WTAAlgorithm[];
+  assignments: AssignmentResult | null;
+  onFetchAssignments: (algorithm?: string) => void;
 }
 
 export function ControlPanel({
@@ -100,18 +109,25 @@ export function ControlPanel({
   onStopReplay,
   showAdvanced,
   onToggleAdvanced,
+  // Phase 5
+  wtaAlgorithms,
+  assignments,
+  onFetchAssignments,
 }: ControlPanelProps) {
   const [selectedScenario, setSelectedScenario] = useState('head_on');
   const [selectedGuidance, setSelectedGuidance] = useState('proportional_nav');
   const [navConstant, setNavConstant] = useState(4.0);
   const [selectedEvasion, setSelectedEvasion] = useState('none');
   const [numInterceptors, setNumInterceptors] = useState(1);
+  const [numTargets, setNumTargets] = useState(1);  // Phase 5
+  const [selectedWTA, setSelectedWTA] = useState('hungarian');  // Phase 5: Default to optimal
   const [mcResults, setMcResults] = useState<MonteCarloResults | null>(null);
   const [envelopeResults, setEnvelopeResults] = useState<EnvelopeResults | null>(null);
   const [activePanel, setActivePanel] = useState<string | null>(null);
 
   const isRunning = state?.status === 'running';
-  const target = state?.entities.find((e) => e.type === 'target');
+  const targets = state?.entities.filter((e) => e.type === 'target') || [];  // Phase 5
+  const target = targets[0];  // Backward compat
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
   // Auto-fetch geometry data during simulation
@@ -120,10 +136,22 @@ export function ControlPanel({
       const interval = setInterval(() => {
         onFetchInterceptGeometry();
         onFetchThreatAssessment();
+        // Phase 5: Also fetch WTA assignments for multi-target scenarios
+        if (numTargets > 1) {
+          onFetchAssignments(selectedWTA);
+        }
       }, 200);
       return () => clearInterval(interval);
     }
-  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment]);
+  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA]);
+
+  // Phase 5: Update numTargets when scenario changes
+  useEffect(() => {
+    const scenario = scenarios[selectedScenario];
+    if (scenario?.num_targets) {
+      setNumTargets(scenario.num_targets);
+    }
+  }, [selectedScenario, scenarios]);
 
   const handleStart = () => {
     onStart({
@@ -132,6 +160,8 @@ export function ControlPanel({
       navConstant,
       evasion: selectedEvasion,
       numInterceptors,
+      numTargets,  // Phase 5
+      wtaAlgorithm: selectedWTA,  // Phase 5
     });
   };
 
@@ -241,6 +271,38 @@ export function ControlPanel({
           />
         </div>
 
+        {/* Phase 5: Targets slider */}
+        <div className="toolbar-group target-group">
+          <label>TGT: {numTargets}</label>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="1"
+            value={numTargets}
+            onChange={(e) => setNumTargets(parseInt(e.target.value))}
+            disabled={isRunning}
+          />
+        </div>
+
+        {/* Phase 5: WTA algorithm selector (show when multiple targets) */}
+        {numTargets > 1 && (
+          <div className="toolbar-group">
+            <label>WTA</label>
+            <select
+              value={selectedWTA}
+              onChange={(e) => setSelectedWTA(e.target.value)}
+              disabled={isRunning}
+            >
+              {wtaAlgorithms.map((alg) => (
+                <option key={alg.id} value={alg.id} title={alg.description}>
+                  {alg.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="toolbar-actions">
           {!isRunning ? (
             <button className="btn-launch" onClick={handleStart} disabled={!connected}>
@@ -319,63 +381,69 @@ export function ControlPanel({
           </div>
         )}
 
-        {/* Interceptor Telemetry */}
-        {interceptors.slice(0, 2).map((int, idx) => (
-          <div key={int.id} className="hud-panel interceptor-panel">
-            <div className="hud-title interceptor">INT{idx + 1}</div>
-            <div className="hud-content">
-              <div className="hud-row">
-                <span className="hud-label">POS</span>
-                <span className="hud-value mono">
-                  {int.position.x.toFixed(0)}, {int.position.y.toFixed(0)}
-                </span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">SPD</span>
-                <span className="hud-value">{int.speed.toFixed(0)} m/s</span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">ACC</span>
-                <span className="hud-value">
-                  {Math.sqrt(
-                    int.acceleration.x ** 2 + int.acceleration.y ** 2 + int.acceleration.z ** 2
-                  ).toFixed(0)} m/s²
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
+        {/* Interceptor Telemetry with assigned target geometry */}
+        {interceptors.slice(0, 4).map((int) => {
+          // Find the assignment for this interceptor
+          const assignment = assignments?.assignments.find(a => a.interceptor_id === int.id);
+          const assignedTargetId = assignment?.target_id;
 
-        {/* Geometry Panel */}
-        {interceptGeometry && interceptGeometry.length > 0 && (
-          <div className="hud-panel geometry-panel">
-            <div className="hud-title">GEOM</div>
-            <div className="hud-content">
-              <div className="hud-row">
-                <span className="hud-label">RNG</span>
-                <span className="hud-value">{(interceptGeometry[0].los_range / 1000).toFixed(2)} km</span>
+          // Find geometry for this interceptor's assigned target only
+          const geom = interceptGeometry?.find(
+            g => g.interceptor_id === int.id &&
+                 (assignedTargetId ? g.target_id === assignedTargetId : true)
+          );
+
+          // Check if this interceptor has hit its target
+          const hasHit = state?.intercepted_pairs?.some(pair => pair[0] === int.id);
+
+          return (
+            <div key={int.id} className={`hud-panel interceptor-panel ${hasHit ? 'interceptor-hit' : ''}`}>
+              <div className="hud-title interceptor">
+                {int.id}
+                {assignedTargetId && <span className="assigned-target">→{assignedTargetId}</span>}
               </div>
-              <div className="hud-row">
-                <span className="hud-label">TTI</span>
-                <span className="hud-value">
-                  {interceptGeometry[0].time_to_intercept >= 0
-                    ? `${interceptGeometry[0].time_to_intercept.toFixed(1)}s`
-                    : '---'}
-                </span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">Vc</span>
-                <span className="hud-value">{interceptGeometry[0].closing_velocity.toFixed(0)} m/s</span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">COL</span>
-                <span className={`hud-value ${interceptGeometry[0].collision_course ? 'result-intercept' : 'result-missed'}`}>
-                  {interceptGeometry[0].collision_course ? 'YES' : 'NO'}
-                </span>
+              <div className="hud-content">
+                {hasHit ? (
+                  <div className="hud-row">
+                    <span className="hud-label">STATUS</span>
+                    <span className="hud-value result-intercept">HIT</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="hud-row">
+                      <span className="hud-label">SPD</span>
+                      <span className="hud-value">{int.speed.toFixed(0)} m/s</span>
+                    </div>
+                    {geom && (
+                      <>
+                        <div className="hud-row">
+                          <span className="hud-label">RNG</span>
+                          <span className="hud-value">{(geom.los_range / 1000).toFixed(2)} km</span>
+                        </div>
+                        <div className="hud-row">
+                          <span className="hud-label">TTI</span>
+                          <span className="hud-value">
+                            {geom.time_to_intercept >= 0 ? `${geom.time_to_intercept.toFixed(1)}s` : '---'}
+                          </span>
+                        </div>
+                        <div className="hud-row">
+                          <span className="hud-label">Vc</span>
+                          <span className="hud-value">{geom.closing_velocity.toFixed(0)} m/s</span>
+                        </div>
+                        <div className="hud-row">
+                          <span className="hud-label">COL</span>
+                          <span className={`hud-value ${geom.collision_course ? 'result-intercept' : 'result-missed'}`}>
+                            {geom.collision_course ? 'YES' : 'NO'}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          );
+        })}
 
         {/* Threat Panel */}
         {threatAssessment && threatAssessment.length > 0 && threatAssessment[0].threats.length > 0 && (
@@ -397,6 +465,50 @@ export function ControlPanel({
               <div className="hud-row">
                 <span className="hud-label">REC</span>
                 <span className="hud-value">{threatAssessment[0].engagement_recommendation.toUpperCase()}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Phase 5: WTA Assignments Panel */}
+        {assignments && assignments.assignments.length > 0 && targets.length > 1 && (
+          <div className="hud-panel wta-panel">
+            <div className="hud-title">WTA</div>
+            <div className="hud-content">
+              <div className="hud-row">
+                <span className="hud-label">ALGO</span>
+                <span className="hud-value">{assignments.algorithm.split('_').join(' ').toUpperCase()}</span>
+              </div>
+              {assignments.assignments.slice(0, 3).map((a) => (
+                <div key={a.interceptor_id} className="hud-row">
+                  <span className="hud-label">{a.interceptor_id}</span>
+                  <span className="hud-value">{a.target_id}</span>
+                </div>
+              ))}
+              {assignments.unassigned_targets.length > 0 && (
+                <div className="hud-row">
+                  <span className="hud-label">UNASGN</span>
+                  <span className="hud-value result-missed">{assignments.unassigned_targets.join(', ')}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 5: Multi-target summary */}
+        {targets.length > 1 && state?.intercepted_pairs && state.intercepted_pairs.length > 0 && (
+          <div className="hud-panel intercepts-panel">
+            <div className="hud-title result-intercept">KILLS</div>
+            <div className="hud-content">
+              {state.intercepted_pairs.map(([intId, tgtId]) => (
+                <div key={`${intId}-${tgtId}`} className="hud-row">
+                  <span className="hud-label">{intId}</span>
+                  <span className="hud-value result-intercept">{tgtId}</span>
+                </div>
+              ))}
+              <div className="hud-row">
+                <span className="hud-label">TOTAL</span>
+                <span className="hud-value">{state.intercepted_pairs.length}/{targets.length}</span>
               </div>
             </div>
           </div>
