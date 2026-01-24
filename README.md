@@ -4,6 +4,8 @@
 
 A real-time simulation for understanding how missiles actually find their targets — from basic pursuit to proportional navigation to AI-guided intercepts.
 
+![Intercept Simulation](docs/screenshot.png)
+
 ---
 
 ## Why This Exists
