@@ -18,6 +18,10 @@ export interface EntityState {
   velocity: Vec3;
   acceleration: Vec3;
   speed: number;
+  // Phase 6: Physical properties
+  mass?: number;
+  cross_section?: number;
+  drag_coefficient?: number;
 }
 
 export interface SimCompleteEvent {
@@ -309,4 +313,215 @@ export interface Scenario {
   evasion?: string;
   num_targets?: number;
   target_spacing?: number;
+}
+
+// Phase 6: Environment Types
+export interface EnvironmentConfig {
+  wind_velocity: Vec3;
+  wind_gust_amplitude: number;
+  wind_gust_period: number;
+  enable_drag: boolean;
+  drag_coefficient: number;
+  sea_level_density: number;
+}
+
+export interface EnvironmentState {
+  enabled: boolean;
+  wind_velocity: Vec3;
+  wind_gust_amplitude: number;
+  wind_gust_period: number;
+  enable_drag: boolean;
+  drag_coefficient: number;
+  sea_level_density: number;
+  current_wind?: Vec3;
+}
+
+export interface EnvironmentConfigRequest {
+  wind_speed: number;       // m/s
+  wind_direction: number;   // degrees (0=North, 90=East)
+  wind_gust_amplitude: number;  // m/s
+  wind_gust_period: number;     // seconds
+  enable_drag: boolean;
+  drag_coefficient: number;
+}
+
+// Extended SimStateEvent with environment
+export interface SimStateEventWithEnvironment extends SimStateEvent {
+  environment?: {
+    config: EnvironmentConfig;
+    current_wind: Vec3;
+  };
+}
+
+// Phase 6: Kalman Filter Types
+export interface KalmanState {
+  position: Vec3;
+  velocity: Vec3;
+  position_uncertainty: number;
+  velocity_uncertainty: number;
+  timestamp: number;
+  num_updates: number;
+  covariance_trace: number;
+}
+
+export interface KalmanConfig {
+  process_noise_pos: number;
+  process_noise_vel: number;
+  measurement_noise_pos: number;
+  initial_pos_variance: number;
+  initial_vel_variance: number;
+}
+
+// Phase 6: Enhanced Track with Kalman
+export interface SensorTrack {
+  track_id: string;
+  target_id: string;
+  position: Vec3;
+  velocity: Vec3;
+  track_quality: number;
+  detections: number;
+  coasting: boolean;
+  is_firm: boolean;
+  position_uncertainty: number;
+  kalman?: KalmanState;
+}
+
+export interface SensorTracksResponse {
+  timestamp: number;
+  tracks_by_sensor: Record<string, SensorTrack[]>;
+  total_tracks: number;
+}
+
+// Phase 6: Fused Track Types
+export interface FusedTrack {
+  track_id: string;
+  target_id: string;
+  contributing_sensors: string[];
+  contributing_track_ids: string[];
+  position: Vec3;
+  velocity: Vec3;
+  position_uncertainty: number;
+  confidence: number;
+  last_update: number;
+  num_updates: number;
+}
+
+export interface FusedTracksResponse {
+  timestamp: number;
+  fused_tracks: FusedTrack[];
+  num_fused_tracks: number;
+}
+
+// Phase 6: Cooperative Engagement Types
+export interface EngagementZone {
+  zone_id: string;
+  name: string;
+  center: Vec3;
+  dimensions: Vec3;  // width, depth, height
+  rotation: number;  // heading in degrees
+  assigned_interceptors: string[];
+  priority: number;
+  active: boolean;
+  color: string;
+}
+
+export interface HandoffRequest {
+  request_id: string;
+  from_interceptor: string;
+  to_interceptor: string;
+  target_id: string;
+  reason: 'fuel_low' | 'out_of_envelope' | 'reassignment' | 'zone_boundary' | 'better_geometry' | 'manual';
+  status: 'pending' | 'approved' | 'executed' | 'rejected' | 'expired';
+  timestamp: number;
+  approved_at?: number;
+  executed_at?: number;
+  expiry_time: number;
+}
+
+export interface CooperativeState {
+  enabled: boolean;
+  engagement_zones: EngagementZone[];
+  pending_handoffs: HandoffRequest[];
+  completed_handoffs: HandoffRequest[];
+  interceptor_zones: Record<string, string>;  // interceptor_id -> zone_id
+  target_assignments: Record<string, string>;  // target_id -> interceptor_id
+}
+
+export interface EngagementZoneCreateRequest {
+  name: string;
+  center_x: number;
+  center_y: number;
+  center_z: number;
+  width: number;
+  depth: number;
+  height: number;
+  rotation?: number;
+  priority?: number;
+  color?: string;
+}
+
+export interface HandoffRequestCreate {
+  from_interceptor: string;
+  to_interceptor: string;
+  target_id: string;
+  reason?: string;
+}
+
+// Phase 6.4: ML/AI Types
+export interface MLModelInfo {
+  model_id: string;
+  path: string;
+  loaded: boolean;
+  active: boolean;
+}
+
+export interface MLModelsResponse {
+  threat_models: MLModelInfo[];
+  guidance_models: MLModelInfo[];
+}
+
+export interface MLStatus {
+  onnx_available: boolean;
+  models: MLModelsResponse;
+  active_threat_model: string | null;
+  active_guidance_model: string | null;
+}
+
+export interface MLModelLoadRequest {
+  model_id: string;
+  model_path: string;
+  model_type: 'threat_assessment' | 'guidance';
+  device?: 'cpu' | 'cuda';
+  num_threads?: number;
+}
+
+export interface MLModelActivateRequest {
+  model_id: string;
+  model_type: 'threat_assessment' | 'guidance';
+}
+
+export interface MLThreatPrediction {
+  target_id: string;
+  threat_score: number;
+  confidence: number;
+  threat_level: 'critical' | 'high' | 'medium' | 'low';
+  feature_importances?: Record<string, number>;
+}
+
+export interface MLThreatAssessmentResponse {
+  mode: 'ml' | 'rule' | 'hybrid';
+  model_active: boolean;
+  assessments: ThreatAssessment[];
+}
+
+export interface MLFeatures {
+  values: number[];
+  names: string[];
+}
+
+export interface MLFeaturesResponse {
+  interceptor_id: string;
+  target_id: string;
+  threat_features: MLFeatures;
+  guidance_features: MLFeatures;
 }

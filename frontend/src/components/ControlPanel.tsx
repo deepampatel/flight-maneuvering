@@ -22,6 +22,13 @@ import type {
   // Phase 5
   WTAAlgorithm,
   AssignmentResult,
+  // Phase 6
+  EnvironmentState,
+  CooperativeState,
+  EngagementZoneCreateRequest,
+  HandoffRequestCreate,
+  // Phase 6.4: ML
+  MLStatus,
 } from '../types';
 
 interface ControlPanelProps {
@@ -38,6 +45,13 @@ interface ControlPanelProps {
     numInterceptors: number;
     numTargets?: number;  // Phase 5
     wtaAlgorithm?: string;  // Phase 5
+    // Phase 6: Environment
+    windSpeed?: number;
+    windDirection?: number;
+    windGusts?: number;
+    enableDrag?: boolean;
+    // Phase 6: Cooperative
+    enableCooperative?: boolean;
   }) => void;
   onStop: () => void;
   onRunMonteCarlo: (options: {
@@ -79,6 +93,27 @@ interface ControlPanelProps {
   wtaAlgorithms: WTAAlgorithm[];
   assignments: AssignmentResult | null;
   onFetchAssignments: (algorithm?: string) => void;
+  // Phase 6: Environment
+  environmentState: EnvironmentState | null;
+  // Phase 6: Sensor tracks
+  onFetchSensorTracks?: () => void;
+  // Phase 6: Cooperative Engagement
+  cooperativeState?: CooperativeState | null;
+  onFetchCooperativeState?: () => void;
+  onCreateEngagementZone?: (zone: EngagementZoneCreateRequest) => void;
+  onDeleteEngagementZone?: (zoneId: string) => void;
+  onAssignInterceptorToZone?: (interceptorId: string, zoneId: string) => void;
+  onRequestHandoff?: (request: HandoffRequestCreate) => void;
+  // Mission Planner (props passed through but not used in ControlPanel)
+  plannerMode?: string;
+  onSetPlannerMode?: (mode: string) => void;
+  plannedEntities?: { id: string; type: string; position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } }[];
+  plannedZones?: { id: string; name: string; center: { x: number; y: number; z: number }; dimensions: { x: number; y: number; z: number }; color: string }[];
+  onClearPlanner?: () => void;
+  onRemovePlannedEntity?: (id: string) => void;
+  // Phase 6.4: ML
+  mlStatus?: MLStatus | null;
+  onFetchMLStatus?: () => void;
 }
 
 export function ControlPanel({
@@ -113,7 +148,37 @@ export function ControlPanel({
   wtaAlgorithms,
   assignments,
   onFetchAssignments,
+  // Phase 6
+  environmentState,
+  onFetchSensorTracks,
+  // Phase 6: Cooperative
+  cooperativeState,
+  onFetchCooperativeState,
+  onCreateEngagementZone,
+  onDeleteEngagementZone: _onDeleteEngagementZone,  // Reserved for future UI
+  onAssignInterceptorToZone: _onAssignInterceptorToZone,  // Reserved for future UI
+  onRequestHandoff: _onRequestHandoff,  // Reserved for future UI
+  // Mission Planner (not used in ControlPanel, passed from App)
+  plannerMode: _plannerMode,
+  onSetPlannerMode: _onSetPlannerMode,
+  plannedEntities: _plannedEntities,
+  plannedZones: _plannedZones,
+  onClearPlanner: _onClearPlanner,
+  onRemovePlannedEntity: _onRemovePlannedEntity,
+  // Phase 6.4: ML
+  mlStatus,
+  onFetchMLStatus,
 }: ControlPanelProps) {
+  // Suppress unused warnings for reserved handlers
+  void _onDeleteEngagementZone;
+  void _onAssignInterceptorToZone;
+  void _onRequestHandoff;
+  void _plannerMode;
+  void _onSetPlannerMode;
+  void _plannedEntities;
+  void _plannedZones;
+  void _onClearPlanner;
+  void _onRemovePlannedEntity;
   const [selectedScenario, setSelectedScenario] = useState('head_on');
   const [selectedGuidance, setSelectedGuidance] = useState('proportional_nav');
   const [navConstant, setNavConstant] = useState(4.0);
@@ -121,6 +186,13 @@ export function ControlPanel({
   const [numInterceptors, setNumInterceptors] = useState(1);
   const [numTargets, setNumTargets] = useState(1);  // Phase 5
   const [selectedWTA, setSelectedWTA] = useState('hungarian');  // Phase 5: Default to optimal
+  // Phase 6: Environment state
+  const [windSpeed, setWindSpeed] = useState(0);  // m/s
+  const [windDirection, setWindDirection] = useState(0);  // degrees
+  const [windGusts, setWindGusts] = useState(0);  // m/s
+  const [enableDrag, setEnableDrag] = useState(false);
+  // Phase 6: Cooperative state
+  const [enableCooperative, setEnableCooperative] = useState(false);
   const [mcResults, setMcResults] = useState<MonteCarloResults | null>(null);
   const [envelopeResults, setEnvelopeResults] = useState<EnvelopeResults | null>(null);
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -140,10 +212,18 @@ export function ControlPanel({
         if (numTargets > 1) {
           onFetchAssignments(selectedWTA);
         }
+        // Phase 6: Fetch sensor tracks for uncertainty visualization
+        if (onFetchSensorTracks) {
+          onFetchSensorTracks();
+        }
+        // Phase 6: Fetch cooperative state
+        if (onFetchCooperativeState && enableCooperative) {
+          onFetchCooperativeState();
+        }
       }, 200);
       return () => clearInterval(interval);
     }
-  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA]);
+  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative]);
 
   // Phase 5: Update numTargets when scenario changes
   useEffect(() => {
@@ -162,6 +242,13 @@ export function ControlPanel({
       numInterceptors,
       numTargets,  // Phase 5
       wtaAlgorithm: selectedWTA,  // Phase 5
+      // Phase 6: Environment
+      windSpeed,
+      windDirection,
+      windGusts,
+      enableDrag,
+      // Phase 6: Cooperative
+      enableCooperative,
     });
   };
 
@@ -552,10 +639,25 @@ export function ControlPanel({
               Envelope
             </button>
             <button
+              className={activePanel === 'environment' ? 'active' : ''}
+              onClick={() => togglePanel('environment')}
+            >
+              Environment
+            </button>
+            <button
               className={activePanel === 'recordings' ? 'active' : ''}
               onClick={() => togglePanel('recordings')}
             >
               Recordings ({recordings.length})
+            </button>
+            <button
+              className={activePanel === 'ml' ? 'active' : ''}
+              onClick={() => {
+                togglePanel('ml');
+                if (onFetchMLStatus) onFetchMLStatus();
+              }}
+            >
+              ML/AI
             </button>
           </div>
 
@@ -653,6 +755,137 @@ export function ControlPanel({
             </div>
           )}
 
+          {/* Environment Content */}
+          {activePanel === 'environment' && (
+            <div className="advanced-content">
+              <p className="panel-desc">Configure wind and atmospheric drag effects</p>
+
+              <div className="env-controls">
+                <div className="env-row">
+                  <label>Wind Speed: {windSpeed} m/s</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    step="1"
+                    value={windSpeed}
+                    onChange={(e) => setWindSpeed(parseInt(e.target.value))}
+                    disabled={isRunning}
+                  />
+                </div>
+
+                <div className="env-row">
+                  <label>Wind Direction: {windDirection}°</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="15"
+                    value={windDirection}
+                    onChange={(e) => setWindDirection(parseInt(e.target.value))}
+                    disabled={isRunning}
+                  />
+                  <span className="wind-compass">
+                    {windDirection === 0 ? 'N' : windDirection === 90 ? 'E' : windDirection === 180 ? 'S' : windDirection === 270 ? 'W' : `${windDirection}°`}
+                  </span>
+                </div>
+
+                <div className="env-row">
+                  <label>Wind Gusts: {windGusts} m/s</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value={windGusts}
+                    onChange={(e) => setWindGusts(parseInt(e.target.value))}
+                    disabled={isRunning}
+                  />
+                </div>
+
+                <div className="env-row checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enableDrag}
+                      onChange={(e) => setEnableDrag(e.target.checked)}
+                      disabled={isRunning}
+                    />
+                    Enable Atmospheric Drag
+                  </label>
+                </div>
+
+                <div className="env-row checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enableCooperative}
+                      onChange={(e) => setEnableCooperative(e.target.checked)}
+                      disabled={isRunning}
+                    />
+                    Enable Cooperative Engagement
+                  </label>
+                </div>
+              </div>
+
+              {/* Current environment state display */}
+              {environmentState && environmentState.enabled && (
+                <div className="env-state">
+                  <div className="env-state-title">Current Wind</div>
+                  <div className="env-state-row">
+                    <span>X: {environmentState.current_wind?.x.toFixed(1) || 0} m/s</span>
+                    <span>Y: {environmentState.current_wind?.y.toFixed(1) || 0} m/s</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Cooperative engagement controls */}
+              {enableCooperative && isRunning && cooperativeState?.enabled && (
+                <div className="env-state">
+                  <div className="env-state-title">Cooperative Engagement</div>
+                  <div className="env-state-row">
+                    <span>Zones: {cooperativeState?.engagement_zones?.length || 0}</span>
+                    <span>Handoffs: {cooperativeState?.pending_handoffs?.length || 0}</span>
+                  </div>
+                  <button
+                    className="btn-action"
+                    style={{ marginTop: '8px' }}
+                    onClick={() => {
+                      if (onCreateEngagementZone) {
+                        onCreateEngagementZone({
+                          name: `Zone ${(cooperativeState?.engagement_zones?.length || 0) + 1}`,
+                          center_x: 1500 + Math.random() * 500,
+                          center_y: 0,
+                          center_z: 600,
+                          width: 800,
+                          depth: 800,
+                          height: 400,
+                          rotation: 0,
+                          priority: 1,
+                          color: ['#00ff00', '#00ffff', '#ff00ff', '#ffff00'][
+                            (cooperativeState?.engagement_zones?.length || 0) % 4
+                          ],
+                        });
+                      }
+                    }}
+                  >
+                    + Add Engagement Zone
+                  </button>
+                </div>
+              )}
+
+              {/* Help text when cooperative enabled but not running */}
+              {enableCooperative && !isRunning && (
+                <div className="env-state">
+                  <div className="env-state-title">Cooperative Mode</div>
+                  <p className="panel-desc" style={{ margin: '4px 0' }}>
+                    Start a run to create engagement zones
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Recordings Content */}
           {activePanel === 'recordings' && (
             <div className="advanced-content">
@@ -675,6 +908,65 @@ export function ControlPanel({
               ) : (
                 <p className="panel-desc">No recordings. Start recording during simulation.</p>
               )}
+            </div>
+          )}
+
+          {/* ML/AI Content */}
+          {activePanel === 'ml' && (
+            <div className="advanced-content">
+              <p className="panel-desc">Neural network threat assessment and RL guidance policies</p>
+
+              <div className="ml-status">
+                <div className="ml-status-row">
+                  <span className="hud-label">ONNX Runtime</span>
+                  <span className={`hud-value ${mlStatus?.onnx_available ? 'result-intercept' : 'result-missed'}`}>
+                    {mlStatus?.onnx_available ? 'AVAILABLE' : 'NOT INSTALLED'}
+                  </span>
+                </div>
+
+                {!mlStatus?.onnx_available && (
+                  <div className="ml-install-hint">
+                    <code>pip install onnxruntime</code>
+                  </div>
+                )}
+
+                <div className="ml-section">
+                  <div className="ml-section-title">Threat Models</div>
+                  {mlStatus?.models?.threat_models && mlStatus.models.threat_models.length > 0 ? (
+                    mlStatus.models.threat_models.map((model) => (
+                      <div key={model.model_id} className="ml-model-row">
+                        <span className="model-id">{model.model_id}</span>
+                        <span className={`model-status ${model.active ? 'active' : ''}`}>
+                          {model.active ? 'ACTIVE' : model.loaded ? 'LOADED' : 'UNLOADED'}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="ml-no-models">No models loaded</div>
+                  )}
+                </div>
+
+                <div className="ml-section">
+                  <div className="ml-section-title">Guidance Models</div>
+                  {mlStatus?.models?.guidance_models && mlStatus.models.guidance_models.length > 0 ? (
+                    mlStatus.models.guidance_models.map((model) => (
+                      <div key={model.model_id} className="ml-model-row">
+                        <span className="model-id">{model.model_id}</span>
+                        <span className={`model-status ${model.active ? 'active' : ''}`}>
+                          {model.active ? 'ACTIVE' : model.loaded ? 'LOADED' : 'UNLOADED'}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="ml-no-models">No models loaded</div>
+                  )}
+                </div>
+
+                <div className="ml-info">
+                  <p>Load ONNX models via API:</p>
+                  <code>POST /ml/models/load</code>
+                </div>
+              </div>
             </div>
           )}
         </div>

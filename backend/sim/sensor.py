@@ -39,6 +39,7 @@ import random
 
 from .vector import Vec3
 from .entities import Entity
+from .kalman import KalmanFilter, KalmanState, KalmanConfig
 
 
 @dataclass
@@ -63,6 +64,10 @@ class SensorConfig:
     # Track management
     track_init_detections: int = 3  # detections needed to establish track
     track_coast_time: float = 2.0   # seconds before track is dropped
+
+    # Phase 6: Kalman filter settings
+    use_kalman: bool = True         # Use Kalman filter (vs alpha-beta)
+    kalman_config: Optional[KalmanConfig] = None  # Kalman filter configuration
 
 
 @dataclass
@@ -93,6 +98,15 @@ class Track:
     coasting: bool                    # True if track is coasting (no recent detection)
     is_firm: bool                     # True if track is confirmed (enough detections)
 
+    # Phase 6: Kalman filter state (optional)
+    kalman_state: Optional[KalmanState] = None
+
+    def get_position_uncertainty(self) -> float:
+        """Get position uncertainty from Kalman state if available."""
+        if self.kalman_state:
+            return self.kalman_state.get_position_uncertainty()
+        return 100.0  # Default uncertainty when not using Kalman
+
 
 @dataclass
 class SensorState:
@@ -113,10 +127,20 @@ class SensorModel:
     2. Calculate detection probability
     3. Generate noisy measurements
     4. Manage track quality
+    5. Phase 6: Kalman filtering for optimal state estimation
     """
 
     def __init__(self, config: SensorConfig = None):
         self.config = config or SensorConfig()
+
+        # Phase 6: Kalman filter instance
+        if self.config.use_kalman:
+            kalman_cfg = self.config.kalman_config or KalmanConfig(
+                measurement_noise_pos=self.config.range_noise_std
+            )
+            self._kalman = KalmanFilter(kalman_cfg)
+        else:
+            self._kalman = None
 
     def is_in_fov(
         self,
@@ -351,6 +375,148 @@ class SensorModel:
 
         Returns:
             Updated track
+        """
+        # Phase 6: Use Kalman filter if enabled
+        if self._kalman is not None:
+            return self._update_track_kalman(track, detection, target_velocity, sim_time)
+
+        # Original alpha-beta implementation
+        return self._update_track_alpha_beta(track, detection, target_velocity, sim_time)
+
+    def _update_track_kalman(
+        self,
+        track: Optional[Track],
+        detection: Detection,
+        target_velocity: Vec3,
+        sim_time: float
+    ) -> Track:
+        """
+        Update track using Kalman filter.
+
+        Phase 6: Proper state estimation with uncertainty quantification.
+        """
+        if track is None:
+            # Create new track with initial Kalman state
+            if detection.detected:
+                kalman_state = self._kalman.initialize(
+                    detection.estimated_position,
+                    target_velocity,
+                    sim_time
+                )
+                return Track(
+                    target_id=detection.target_id,
+                    track_quality=detection.confidence,
+                    detections=1,
+                    last_detection_time=sim_time,
+                    estimated_position=detection.estimated_position,
+                    estimated_velocity=target_velocity,
+                    coasting=False,
+                    is_firm=False,
+                    kalman_state=kalman_state
+                )
+            else:
+                return Track(
+                    target_id=detection.target_id,
+                    track_quality=0.0,
+                    detections=0,
+                    last_detection_time=0.0,
+                    estimated_position=detection.true_position,
+                    estimated_velocity=target_velocity,
+                    coasting=True,
+                    is_firm=False,
+                    kalman_state=None
+                )
+
+        # Update existing track
+        if detection.detected:
+            # Good detection - Kalman update
+            new_detections = track.detections + 1
+
+            if track.kalman_state is not None:
+                # Predict and update Kalman state
+                new_kalman_state = self._kalman.predict_and_update(
+                    track.kalman_state,
+                    detection.estimated_position,
+                    sim_time,
+                    measurement_noise=self.config.range_noise_std
+                )
+            else:
+                # Initialize Kalman state
+                new_kalman_state = self._kalman.initialize(
+                    detection.estimated_position,
+                    target_velocity,
+                    sim_time
+                )
+
+            # Extract position/velocity from Kalman state
+            new_position = new_kalman_state.get_position()
+            new_velocity = new_kalman_state.get_velocity()
+
+            # Update quality based on detection history and Kalman confidence
+            uncertainty = new_kalman_state.get_position_uncertainty()
+            # Lower uncertainty = higher quality
+            uncertainty_factor = max(0, 1 - uncertainty / 500)
+            quality_gain = 0.2 * (1 + uncertainty_factor)
+            new_quality = min(1.0, track.track_quality + quality_gain)
+
+            return Track(
+                target_id=track.target_id,
+                track_quality=new_quality,
+                detections=new_detections,
+                last_detection_time=sim_time,
+                estimated_position=new_position,
+                estimated_velocity=new_velocity,
+                coasting=False,
+                is_firm=new_detections >= self.config.track_init_detections,
+                kalman_state=new_kalman_state
+            )
+        else:
+            # No detection - coast track with Kalman prediction
+            coast_time = sim_time - track.last_detection_time
+
+            if track.kalman_state is not None:
+                # Predict forward without update (coasting)
+                dt = sim_time - track.kalman_state.timestamp
+                if dt > 0:
+                    predicted_kalman = self._kalman.predict(track.kalman_state, dt)
+                else:
+                    predicted_kalman = track.kalman_state
+                predicted_position = predicted_kalman.get_position()
+                predicted_velocity = predicted_kalman.get_velocity()
+            else:
+                # No Kalman state - dead reckoning
+                dt = sim_time - track.last_detection_time if track.last_detection_time > 0 else 0
+                predicted_position = track.estimated_position + track.estimated_velocity * dt
+                predicted_velocity = track.estimated_velocity
+                predicted_kalman = None
+
+            # Quality degradation while coasting
+            if coast_time > self.config.track_coast_time:
+                new_quality = max(0.0, track.track_quality - 0.3)
+            else:
+                new_quality = max(0.0, track.track_quality - 0.05)
+
+            return Track(
+                target_id=track.target_id,
+                track_quality=new_quality,
+                detections=track.detections,
+                last_detection_time=track.last_detection_time,
+                estimated_position=predicted_position,
+                estimated_velocity=predicted_velocity,
+                coasting=True,
+                is_firm=track.is_firm and new_quality > 0.3,
+                kalman_state=predicted_kalman
+            )
+
+    def _update_track_alpha_beta(
+        self,
+        track: Optional[Track],
+        detection: Detection,
+        target_velocity: Vec3,
+        sim_time: float
+    ) -> Track:
+        """
+        Original alpha-beta filter implementation (backward compatible).
         """
         if track is None:
             # Create new track

@@ -39,6 +39,11 @@ class Entity:
     Parameters:
     - max_accel: maximum acceleration magnitude (m/s²)
                  This represents physical limits (thrust, structural G-limits)
+
+    Physical properties (for environmental effects):
+    - mass: entity mass in kg (for drag calculations)
+    - cross_section: frontal area in m² (for drag calculations)
+    - drag_coefficient: aerodynamic Cd (optional override)
     """
     id: str
     entity_type: EntityType
@@ -46,6 +51,11 @@ class Entity:
     velocity: Vec3
     acceleration: Vec3 = field(default_factory=Vec3.zero)
     max_accel: float = 50.0  # ~5G, reasonable for a missile
+
+    # Physical properties for environmental effects
+    mass: float = 150.0          # kg (typical small missile)
+    cross_section: float = 0.05  # m² (typical missile cross-section)
+    drag_coefficient: float = 0.3  # Streamlined body Cd
 
     def speed(self) -> float:
         """Current speed (magnitude of velocity)."""
@@ -89,13 +99,19 @@ class Entity:
             "velocity": self.velocity.to_dict(),
             "acceleration": self.acceleration.to_dict(),
             "speed": self.speed(),
+            "mass": self.mass,
+            "cross_section": self.cross_section,
+            "drag_coefficient": self.drag_coefficient,
         }
 
 
 def create_target(
     start_pos: Vec3,
     velocity: Vec3,
-    target_id: str = "T1"
+    target_id: str = "T1",
+    mass: float = 500.0,           # kg (larger aircraft/missile)
+    cross_section: float = 0.2,    # m² (larger frontal area)
+    drag_coefficient: float = 0.4,  # Less streamlined
 ) -> Entity:
     """
     Create a target entity.
@@ -110,13 +126,19 @@ def create_target(
         velocity=velocity,
         acceleration=Vec3.zero(),
         max_accel=30.0,  # Targets typically less maneuverable
+        mass=mass,
+        cross_section=cross_section,
+        drag_coefficient=drag_coefficient,
     )
 
 
 def create_interceptor(
     start_pos: Vec3,
     initial_velocity: Vec3,
-    interceptor_id: str = "I1"
+    interceptor_id: str = "I1",
+    mass: float = 150.0,           # kg (smaller, agile missile)
+    cross_section: float = 0.05,   # m² (small frontal area)
+    drag_coefficient: float = 0.3,  # Streamlined
 ) -> Entity:
     """
     Create an interceptor entity.
@@ -131,4 +153,7 @@ def create_interceptor(
         velocity=initial_velocity,
         acceleration=Vec3.zero(),
         max_accel=100.0,  # Missiles can pull more Gs
+        mass=mass,
+        cross_section=cross_section,
+        drag_coefficient=drag_coefficient,
     )

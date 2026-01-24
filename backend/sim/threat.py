@@ -22,12 +22,15 @@ normalized into the final 0-100 score.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 import math
 
 from .vector import Vec3
 from .entities import Entity
 from .intercept import InterceptGeometry, compute_intercept_geometry
+
+if TYPE_CHECKING:
+    from .ml import ThreatModel
 
 
 @dataclass
@@ -399,3 +402,186 @@ def quick_threat_assessment(
     """
     geometry = compute_intercept_geometry(interceptor, target)
     return compute_threat_score(interceptor, target, geometry, weights)
+
+
+# -----------------------------------------------------------------------------
+# ML-Based Threat Assessment
+# -----------------------------------------------------------------------------
+
+def ml_threat_assessment(
+    interceptor: Entity,
+    targets: List[Entity],
+    model: "ThreatModel",
+    geometries: Optional[List[InterceptGeometry]] = None,
+) -> ThreatAssessment:
+    """
+    Assess threats using ML model.
+
+    Uses neural network to predict threat scores instead of rule-based
+    weighted scoring. Falls back to rule-based if model not loaded.
+
+    Args:
+        interceptor: Our interceptor
+        targets: List of targets to assess
+        model: ThreatModel instance (from ml.inference)
+        geometries: Pre-computed geometries (optional)
+
+    Returns:
+        ThreatAssessment with ML-predicted scores
+    """
+    import time
+    from .ml.features import extract_threat_features, extract_batch_threat_features
+
+    # Compute geometries if not provided
+    if geometries is None:
+        geometries = [compute_intercept_geometry(interceptor, t) for t in targets]
+
+    # Extract features for all targets
+    feature_batch = extract_batch_threat_features(interceptor, targets, geometries)
+    target_ids = [t.id for t in targets]
+
+    # Get ML predictions
+    predictions = model.predict_batch(feature_batch, target_ids)
+
+    # Convert to ThreatScore objects
+    scores: List[ThreatScore] = []
+    for i, (pred, target, geom) in enumerate(zip(predictions, targets, geometries)):
+        # Fill in the full ThreatScore with geometry data
+        altitude_delta = target.position.z - interceptor.position.z
+
+        # Compute component scores (for display/debugging)
+        time_score = score_time_to_impact(geom.time_to_intercept)
+        closing_score = score_closing_velocity(geom.closing_velocity)
+        aspect_score = score_aspect_angle(geom.aspect_angle)
+        altitude_score = score_altitude_advantage(altitude_delta)
+        maneuver_score = score_maneuverability(target.acceleration.magnitude())
+
+        score = ThreatScore(
+            target_id=pred.target_id,
+            total_score=pred.threat_score,
+            threat_level=pred.threat_level,
+            time_score=time_score,
+            closing_score=closing_score,
+            aspect_score=aspect_score,
+            altitude_score=altitude_score,
+            maneuver_score=maneuver_score,
+            time_to_impact=geom.time_to_intercept,
+            closing_velocity=geom.closing_velocity,
+            aspect_angle=geom.aspect_angle,
+            altitude_delta=altitude_delta,
+        )
+        scores.append(score)
+
+    # Sort by total score (descending)
+    scores.sort(key=lambda s: s.total_score, reverse=True)
+
+    # Assign priority ranks
+    for i, score in enumerate(scores):
+        score.priority_rank = i + 1
+
+    # Determine highest threat
+    highest_threat_id = scores[0].target_id if scores else ""
+    highest_score = scores[0].total_score if scores else 0.0
+
+    # Engagement recommendation
+    if highest_score >= 60:
+        recommendation = 'engage'
+    elif highest_score >= 40:
+        recommendation = 'monitor'
+    else:
+        recommendation = 'ignore'
+
+    return ThreatAssessment(
+        timestamp=time.time(),
+        assessor_id=interceptor.id,
+        threats=scores,
+        highest_threat_id=highest_threat_id,
+        engagement_recommendation=recommendation
+    )
+
+
+def hybrid_threat_assessment(
+    interceptor: Entity,
+    targets: List[Entity],
+    model: Optional["ThreatModel"] = None,
+    weights: Optional[ThreatWeights] = None,
+    ml_weight: float = 0.5,
+) -> ThreatAssessment:
+    """
+    Hybrid threat assessment combining rule-based and ML approaches.
+
+    Blends the scores from both methods for robust assessment.
+
+    Args:
+        interceptor: Our interceptor
+        targets: List of targets
+        model: ThreatModel instance (optional)
+        weights: Custom weights for rule-based
+        ml_weight: Weight for ML score (0-1), rule-based gets (1 - ml_weight)
+
+    Returns:
+        ThreatAssessment with blended scores
+    """
+    import time
+
+    # Compute geometries once
+    geometries = [compute_intercept_geometry(interceptor, t) for t in targets]
+
+    # Get rule-based assessment
+    rule_assessment = assess_all_threats(interceptor, targets, geometries, weights)
+
+    # If no model or model not loaded, just return rule-based
+    if model is None or not model.model_loaded:
+        return rule_assessment
+
+    # Get ML assessment
+    ml_assessment = ml_threat_assessment(interceptor, targets, model, geometries)
+
+    # Create lookup for ML scores
+    ml_scores = {s.target_id: s.total_score for s in ml_assessment.threats}
+
+    # Blend scores
+    blended_scores: List[ThreatScore] = []
+    for rule_score in rule_assessment.threats:
+        ml_score = ml_scores.get(rule_score.target_id, rule_score.total_score)
+        blended = rule_score.total_score * (1 - ml_weight) + ml_score * ml_weight
+
+        # Create new ThreatScore with blended total
+        new_score = ThreatScore(
+            target_id=rule_score.target_id,
+            total_score=blended,
+            threat_level=get_threat_level(blended),
+            time_score=rule_score.time_score,
+            closing_score=rule_score.closing_score,
+            aspect_score=rule_score.aspect_score,
+            altitude_score=rule_score.altitude_score,
+            maneuver_score=rule_score.maneuver_score,
+            time_to_impact=rule_score.time_to_impact,
+            closing_velocity=rule_score.closing_velocity,
+            aspect_angle=rule_score.aspect_angle,
+            altitude_delta=rule_score.altitude_delta,
+        )
+        blended_scores.append(new_score)
+
+    # Re-sort and rank
+    blended_scores.sort(key=lambda s: s.total_score, reverse=True)
+    for i, score in enumerate(blended_scores):
+        score.priority_rank = i + 1
+
+    highest_threat_id = blended_scores[0].target_id if blended_scores else ""
+    highest_score = blended_scores[0].total_score if blended_scores else 0.0
+
+    if highest_score >= 60:
+        recommendation = 'engage'
+    elif highest_score >= 40:
+        recommendation = 'monitor'
+    else:
+        recommendation = 'ignore'
+
+    return ThreatAssessment(
+        timestamp=time.time(),
+        assessor_id=interceptor.id,
+        threats=blended_scores,
+        highest_threat_id=highest_threat_id,
+        engagement_recommendation=recommendation
+    )

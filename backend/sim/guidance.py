@@ -50,6 +50,7 @@ class GuidanceType(str, Enum):
     PURE_PURSUIT = "pure_pursuit"
     PROPORTIONAL_NAV = "proportional_nav"
     AUGMENTED_PN = "augmented_pn"
+    ML_POLICY = "ml_policy"
 
 
 @dataclass
@@ -235,26 +236,103 @@ def augmented_pn(state: GuidanceState, params: GuidanceParams) -> Vec3:
     return proportional_navigation(state, params_aug)
 
 
+# -----------------------------------------------------------------------------
+# ML-Based Guidance
+# -----------------------------------------------------------------------------
+
+def ml_guidance(state: GuidanceState, params: GuidanceParams, model=None) -> Vec3:
+    """
+    ML Policy guidance: use trained RL policy for guidance commands.
+
+    If model not available, falls back to proportional navigation.
+
+    Args:
+        state: Current guidance state
+        params: Guidance parameters
+        model: GuidanceModel instance (optional)
+
+    Returns:
+        Acceleration command vector
+    """
+    if model is None:
+        # Fallback to PN
+        return proportional_navigation(state, params)
+
+    # Import here to avoid circular imports
+    from .ml.features import extract_guidance_features
+    from .entities import Entity
+
+    # Create temporary entities for feature extraction
+    # (in real usage, pass actual entities)
+    interceptor = Entity(
+        id="temp_interceptor",
+        entity_type="interceptor",
+        position=state.interceptor_pos,
+        velocity=state.interceptor_vel,
+        max_accel=state.interceptor_max_accel,
+    )
+    target = Entity(
+        id="temp_target",
+        entity_type="target",
+        position=state.target_pos,
+        velocity=state.target_vel,
+        acceleration=state.target_accel,
+    )
+
+    # Extract features
+    features = extract_guidance_features(interceptor, target)
+
+    # Get ML prediction
+    prediction = model.predict(features)
+
+    return prediction.acceleration
+
+
 # Guidance function registry
 GUIDANCE_LAWS = {
     GuidanceType.PURE_PURSUIT: pure_pursuit,
     GuidanceType.PROPORTIONAL_NAV: proportional_navigation,
     GuidanceType.AUGMENTED_PN: augmented_pn,
+    # ML_POLICY handled specially in create_guidance_function
 }
 
 
 def create_guidance_function(
     guidance_type: GuidanceType,
-    params: Optional[GuidanceParams] = None
+    params: Optional[GuidanceParams] = None,
+    ml_model=None,
 ):
     """
     Factory function to create a guidance callable for the sim engine.
 
     Returns a function with signature: (SimState) -> Vec3
+
+    Args:
+        guidance_type: Type of guidance law to use
+        params: Guidance parameters
+        ml_model: GuidanceModel for ML_POLICY type (optional)
     """
     from .engine import SimState  # Import here to avoid circular
 
     params = params or GuidanceParams()
+
+    # Handle ML guidance specially
+    if guidance_type == GuidanceType.ML_POLICY:
+        def ml_guidance_wrapper(sim_state: SimState) -> Vec3:
+            """Wrapper for ML guidance policy."""
+            state = GuidanceState(
+                interceptor_pos=sim_state.interceptor.position,
+                interceptor_vel=sim_state.interceptor.velocity,
+                interceptor_max_accel=sim_state.interceptor.max_accel,
+                target_pos=sim_state.target.position,
+                target_vel=sim_state.target.velocity,
+                target_accel=sim_state.target.acceleration,
+                dt=0.02,
+            )
+            return ml_guidance(state, params, ml_model)
+        return ml_guidance_wrapper
+
+    # Standard guidance laws
     guidance_fn = GUIDANCE_LAWS[guidance_type]
 
     def guidance(sim_state: SimState) -> Vec3:
@@ -271,3 +349,19 @@ def create_guidance_function(
         return guidance_fn(state, params)
 
     return guidance
+
+
+def create_ml_guidance_function(model, params: Optional[GuidanceParams] = None):
+    """
+    Create a guidance function using ML policy model.
+
+    Convenience function that wraps create_guidance_function with ML_POLICY type.
+
+    Args:
+        model: GuidanceModel instance
+        params: Guidance parameters (optional)
+
+    Returns:
+        Callable guidance function
+    """
+    return create_guidance_function(GuidanceType.ML_POLICY, params, ml_model=model)

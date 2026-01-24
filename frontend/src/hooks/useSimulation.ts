@@ -36,10 +36,36 @@ import type {
   AssignmentResult,
   WTAAlgorithm,
   CostMatrix,
+  // Phase 6
+  EnvironmentState,
+  SensorTrack,
+  SensorTracksResponse,
+  FusedTrack,
+  FusedTracksResponse,
+  CooperativeState,
+  EngagementZoneCreateRequest,
+  HandoffRequestCreate,
+  // Phase 6.4: ML
+  MLStatus,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
 const API_URL = 'http://localhost:8000';
+
+interface PlannedEntity {
+  id: string;
+  type: string;
+  position: { x: number; y: number; z: number };
+  velocity: { x: number; y: number; z: number };
+}
+
+interface PlannedZone {
+  id: string;
+  name: string;
+  center: { x: number; y: number; z: number };
+  dimensions: { x: number; y: number; z: number };
+  color: string;
+}
 
 interface RunOptions {
   scenario: string;
@@ -49,6 +75,16 @@ interface RunOptions {
   numInterceptors?: number;
   numTargets?: number;  // Phase 5: Multi-target support
   wtaAlgorithm?: string;  // Phase 5: WTA algorithm selection
+  // Phase 6: Environment
+  windSpeed?: number;
+  windDirection?: number;
+  windGusts?: number;
+  enableDrag?: boolean;
+  // Phase 6: Cooperative
+  enableCooperative?: boolean;
+  // Mission Planner: Custom entities
+  customEntities?: PlannedEntity[];
+  customZones?: PlannedZone[];
 }
 
 interface MonteCarloOptions {
@@ -109,6 +145,24 @@ interface UseSimulationReturn {
   fetchAssignments: (algorithm?: string) => Promise<void>;
   costMatrix: CostMatrix | null;
   fetchCostMatrix: () => Promise<void>;
+  // Phase 6: Environment
+  environmentState: EnvironmentState | null;
+  fetchEnvironmentState: () => Promise<void>;
+  // Phase 6: Kalman & Fusion
+  sensorTracks: SensorTrack[] | null;
+  fusedTracks: FusedTrack[] | null;
+  fetchSensorTracks: () => Promise<void>;
+  fetchFusedTracks: () => Promise<void>;
+  // Phase 6: Cooperative Engagement
+  cooperativeState: CooperativeState | null;
+  fetchCooperativeState: () => Promise<void>;
+  createEngagementZone: (zone: EngagementZoneCreateRequest) => Promise<void>;
+  deleteEngagementZone: (zoneId: string) => Promise<void>;
+  assignInterceptorToZone: (interceptorId: string, zoneId: string) => Promise<void>;
+  requestHandoff: (request: HandoffRequestCreate) => Promise<void>;
+  // Phase 6.4: ML
+  mlStatus: MLStatus | null;
+  fetchMLStatus: () => Promise<void>;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -131,6 +185,15 @@ export function useSimulation(): UseSimulationReturn {
   const [wtaAlgorithms, setWtaAlgorithms] = useState<WTAAlgorithm[]>([]);
   const [assignments, setAssignments] = useState<AssignmentResult | null>(null);
   const [costMatrix, setCostMatrix] = useState<CostMatrix | null>(null);
+  // Phase 6: Environment
+  const [environmentState, setEnvironmentState] = useState<EnvironmentState | null>(null);
+  // Phase 6: Kalman & Fusion
+  const [sensorTracks, setSensorTracks] = useState<SensorTrack[] | null>(null);
+  const [fusedTracks, setFusedTracks] = useState<FusedTrack[] | null>(null);
+  // Phase 6: Cooperative Engagement
+  const [cooperativeState, setCooperativeState] = useState<CooperativeState | null>(null);
+  // Phase 6.4: ML
+  const [mlStatus, setMLStatus] = useState<MLStatus | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
 
@@ -240,6 +303,16 @@ export function useSimulation(): UseSimulationReturn {
         num_targets: options.numTargets,  // Phase 5: Multi-target
         wta_algorithm: options.wtaAlgorithm || 'hungarian',  // Phase 5: WTA algorithm
         real_time: true,
+        // Phase 6: Environment
+        wind_speed: options.windSpeed || 0,
+        wind_direction: options.windDirection || 0,
+        wind_gusts: options.windGusts || 0,
+        enable_drag: options.enableDrag || false,
+        // Phase 6: Cooperative
+        enable_cooperative: options.enableCooperative || false,
+        // Mission Planner: Custom entities
+        custom_entities: options.customEntities,
+        custom_zones: options.customZones,
       }),
     });
 
@@ -517,6 +590,145 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
+  // Phase 6: Fetch environment state
+  const fetchEnvironmentState = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/environment/config`);
+      if (response.ok) {
+        const data = await response.json();
+        setEnvironmentState(data);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 6: Fetch sensor tracks with Kalman state
+  const fetchSensorTracks = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/sensor/tracks`);
+      if (response.ok) {
+        const data: SensorTracksResponse = await response.json();
+        // Flatten tracks from all sensors into a single list
+        const allTracks: SensorTrack[] = [];
+        for (const tracks of Object.values(data.tracks_by_sensor)) {
+          allTracks.push(...tracks);
+        }
+        setSensorTracks(allTracks);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 6: Fetch fused tracks
+  const fetchFusedTracks = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/sensor/fused-tracks`);
+      if (response.ok) {
+        const data: FusedTracksResponse = await response.json();
+        setFusedTracks(data.fused_tracks);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 6: Fetch cooperative state
+  const fetchCooperativeState = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/cooperative/state`);
+      if (response.ok) {
+        const data: CooperativeState = await response.json();
+        setCooperativeState(data);
+      }
+    } catch (e) {
+      // Silently fail if no active simulation
+    }
+  }, []);
+
+  // Phase 6: Create engagement zone
+  const createEngagementZone = useCallback(async (zone: EngagementZoneCreateRequest) => {
+    try {
+      const response = await fetch(`${API_URL}/cooperative/zones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(zone),
+      });
+      if (response.ok) {
+        // Refresh cooperative state
+        await fetchCooperativeState();
+      }
+    } catch (e) {
+      console.error('Failed to create engagement zone:', e);
+    }
+  }, [fetchCooperativeState]);
+
+  // Phase 6: Delete engagement zone
+  const deleteEngagementZone = useCallback(async (zoneId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/cooperative/zones/${zoneId}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        // Refresh cooperative state
+        await fetchCooperativeState();
+      }
+    } catch (e) {
+      console.error('Failed to delete engagement zone:', e);
+    }
+  }, [fetchCooperativeState]);
+
+  // Phase 6: Assign interceptor to zone
+  const assignInterceptorToZone = useCallback(async (interceptorId: string, zoneId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/cooperative/zones/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interceptor_id: interceptorId,
+          zone_id: zoneId,
+        }),
+      });
+      if (response.ok) {
+        // Refresh cooperative state
+        await fetchCooperativeState();
+      }
+    } catch (e) {
+      console.error('Failed to assign interceptor to zone:', e);
+    }
+  }, [fetchCooperativeState]);
+
+  // Phase 6: Request handoff
+  const requestHandoff = useCallback(async (request: HandoffRequestCreate) => {
+    try {
+      const response = await fetch(`${API_URL}/cooperative/handoff/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (response.ok) {
+        // Refresh cooperative state
+        await fetchCooperativeState();
+      }
+    } catch (e) {
+      console.error('Failed to request handoff:', e);
+    }
+  }, [fetchCooperativeState]);
+
+  // Phase 6.4: Fetch ML status
+  const fetchMLStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/ml/status`);
+      if (response.ok) {
+        const data: MLStatus = await response.json();
+        setMLStatus(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch ML status:', e);
+    }
+  }, []);
+
   return {
     connected,
     state,
@@ -559,5 +771,23 @@ export function useSimulation(): UseSimulationReturn {
     fetchAssignments,
     costMatrix,
     fetchCostMatrix,
+    // Phase 6: Environment
+    environmentState,
+    fetchEnvironmentState,
+    // Phase 6: Kalman & Fusion
+    sensorTracks,
+    fusedTracks,
+    fetchSensorTracks,
+    fetchFusedTracks,
+    // Phase 6: Cooperative Engagement
+    cooperativeState,
+    fetchCooperativeState,
+    createEngagementZone,
+    deleteEngagementZone,
+    assignInterceptorToZone,
+    requestHandoff,
+    // Phase 6.4: ML
+    mlStatus,
+    fetchMLStatus,
   };
 }

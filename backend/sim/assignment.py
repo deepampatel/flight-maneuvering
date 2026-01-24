@@ -37,6 +37,11 @@ from .entities import Entity
 from .intercept import InterceptGeometry
 from .threat import ThreatScore
 
+# Avoid circular import
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .cooperation import CooperativeEngagementManager
+
 
 class WTAAlgorithm(str, Enum):
     """Available WTA algorithms."""
@@ -104,7 +109,8 @@ def compute_assignment_cost(
     target: Entity,
     geometry: Optional[InterceptGeometry] = None,
     threat: Optional[ThreatScore] = None,
-    cost_weights: Optional[Dict[str, float]] = None
+    cost_weights: Optional[Dict[str, float]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> float:
     """
     Compute cost of assigning an interceptor to a target.
@@ -117,6 +123,7 @@ def compute_assignment_cost(
         geometry: Pre-computed intercept geometry (optional)
         threat: Threat score for target (optional)
         cost_weights: Custom weights for cost components
+        cooperative_manager: Cooperative engagement manager for zone costs (Phase 6)
 
     Returns:
         Assignment cost (lower is better)
@@ -154,6 +161,14 @@ def compute_assignment_cost(
         weights.get("threat", 0.3) * threat_cost
     )
 
+    # Phase 6: Apply zone cost modifier if cooperative manager is provided
+    if cooperative_manager:
+        zone_modifier = cooperative_manager.get_zone_cost_modifier(
+            interceptor.id,
+            target.position
+        )
+        total_cost *= zone_modifier
+
     return total_cost
 
 
@@ -161,7 +176,8 @@ def compute_cost_matrix(
     interceptors: List[Entity],
     targets: List[Entity],
     geometries: Optional[List[InterceptGeometry]] = None,
-    threats: Optional[List[ThreatScore]] = None
+    threats: Optional[List[ThreatScore]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> List[List[float]]:
     """
     Build NxM cost matrix for assignment optimization.
@@ -173,6 +189,7 @@ def compute_cost_matrix(
         targets: List of target entities
         geometries: Pre-computed geometries (optional)
         threats: Threat scores for targets (optional)
+        cooperative_manager: Cooperative manager for zone costs (Phase 6)
 
     Returns:
         2D cost matrix [num_interceptors][num_targets]
@@ -198,7 +215,10 @@ def compute_cost_matrix(
                         threat = t
                         break
 
-            cost = compute_assignment_cost(interceptor, target, geometry, threat)
+            cost = compute_assignment_cost(
+                interceptor, target, geometry, threat,
+                cooperative_manager=cooperative_manager
+            )
             row.append(cost)
 
         cost_matrix.append(row)
@@ -209,7 +229,8 @@ def compute_cost_matrix(
 def greedy_nearest_assignment(
     interceptors: List[Entity],
     targets: List[Entity],
-    geometries: Optional[List[InterceptGeometry]] = None
+    geometries: Optional[List[InterceptGeometry]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> AssignmentResult:
     """
     Greedy assignment: each interceptor takes nearest unassigned target.
@@ -220,6 +241,7 @@ def greedy_nearest_assignment(
         interceptors: List of interceptor entities
         targets: List of target entities
         geometries: Pre-computed geometries (optional)
+        cooperative_manager: Cooperative manager for zone costs (Phase 6)
 
     Returns:
         AssignmentResult with greedy assignments
@@ -235,28 +257,31 @@ def greedy_nearest_assignment(
     while remaining_interceptors:
         interceptor = remaining_interceptors.pop(0)
 
-        # Find nearest unassigned target
+        # Find best unassigned target (considering zone costs)
         best_target = None
-        best_range = float('inf')
+        best_cost = float('inf')
 
         for target in targets:
             if target.id in assigned_targets:
                 continue
 
-            range_to_target = interceptor.position.distance_to(target.position)
-            if range_to_target < best_range:
-                best_range = range_to_target
+            # Compute cost including zone modifier
+            cost = compute_assignment_cost(
+                interceptor, target,
+                cooperative_manager=cooperative_manager
+            )
+            if cost < best_cost:
+                best_cost = cost
                 best_target = target
 
         if best_target:
-            cost = compute_assignment_cost(interceptor, best_target)
             assignments.append(Assignment(
                 interceptor_id=interceptor.id,
                 target_id=best_target.id,
-                cost=cost,
+                cost=best_cost,
                 reason="nearest_available"
             ))
-            total_cost += cost
+            total_cost += best_cost
             assigned_targets.add(best_target.id)
             assigned_interceptors.add(interceptor.id)
 
@@ -277,7 +302,8 @@ def greedy_threat_assignment(
     interceptors: List[Entity],
     targets: List[Entity],
     threats: List[ThreatScore],
-    geometries: Optional[List[InterceptGeometry]] = None
+    geometries: Optional[List[InterceptGeometry]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> AssignmentResult:
     """
     Threat-prioritized assignment: assign to highest-threat targets first.
@@ -287,6 +313,7 @@ def greedy_threat_assignment(
         targets: List of target entities
         threats: Threat scores for each target
         geometries: Pre-computed geometries (optional)
+        cooperative_manager: Cooperative manager for zone costs (Phase 6)
 
     Returns:
         AssignmentResult with threat-prioritized assignments
@@ -321,7 +348,10 @@ def greedy_threat_assignment(
             if interceptor.id in assigned_interceptors:
                 continue
 
-            cost = compute_assignment_cost(interceptor, target)
+            cost = compute_assignment_cost(
+                interceptor, target,
+                cooperative_manager=cooperative_manager
+            )
             if cost < best_cost:
                 best_cost = cost
                 best_interceptor = interceptor
@@ -358,7 +388,8 @@ def hungarian_assignment(
     targets: List[Entity],
     cost_matrix: Optional[List[List[float]]] = None,
     geometries: Optional[List[InterceptGeometry]] = None,
-    threats: Optional[List[ThreatScore]] = None
+    threats: Optional[List[ThreatScore]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> AssignmentResult:
     """
     Optimal assignment using Hungarian algorithm.
@@ -371,6 +402,7 @@ def hungarian_assignment(
         cost_matrix: Pre-computed cost matrix (optional)
         geometries: Pre-computed geometries (optional)
         threats: Threat scores (optional)
+        cooperative_manager: Cooperative manager for zone costs (Phase 6)
 
     Returns:
         AssignmentResult with optimal assignments
@@ -383,11 +415,14 @@ def hungarian_assignment(
 
     if not has_scipy:
         # Fallback to greedy if scipy not available
-        return greedy_nearest_assignment(interceptors, targets, geometries)
+        return greedy_nearest_assignment(interceptors, targets, geometries, cooperative_manager)
 
     # Build cost matrix if not provided
     if cost_matrix is None:
-        cost_matrix = compute_cost_matrix(interceptors, targets, geometries, threats)
+        cost_matrix = compute_cost_matrix(
+            interceptors, targets, geometries, threats,
+            cooperative_manager=cooperative_manager
+        )
 
     # Handle rectangular matrices (different number of interceptors/targets)
     n_interceptors = len(interceptors)
@@ -491,7 +526,8 @@ def compute_assignment(
     targets: List[Entity],
     algorithm: WTAAlgorithm = WTAAlgorithm.GREEDY_NEAREST,
     geometries: Optional[List[InterceptGeometry]] = None,
-    threats: Optional[List[ThreatScore]] = None
+    threats: Optional[List[ThreatScore]] = None,
+    cooperative_manager: Optional['CooperativeEngagementManager'] = None
 ) -> AssignmentResult:
     """
     Main entry point for weapon-target assignment.
@@ -502,6 +538,7 @@ def compute_assignment(
         algorithm: Which WTA algorithm to use
         geometries: Pre-computed intercept geometries
         threats: Pre-computed threat scores
+        cooperative_manager: Cooperative engagement manager for zone-aware assignment (Phase 6)
 
     Returns:
         AssignmentResult with computed assignments
@@ -509,19 +546,19 @@ def compute_assignment(
     import time
 
     if algorithm == WTAAlgorithm.GREEDY_NEAREST:
-        result = greedy_nearest_assignment(interceptors, targets, geometries)
+        result = greedy_nearest_assignment(interceptors, targets, geometries, cooperative_manager)
     elif algorithm == WTAAlgorithm.GREEDY_THREAT:
         if threats:
-            result = greedy_threat_assignment(interceptors, targets, threats, geometries)
+            result = greedy_threat_assignment(interceptors, targets, threats, geometries, cooperative_manager)
         else:
             # Fallback to nearest if no threat data
-            result = greedy_nearest_assignment(interceptors, targets, geometries)
+            result = greedy_nearest_assignment(interceptors, targets, geometries, cooperative_manager)
     elif algorithm == WTAAlgorithm.HUNGARIAN:
-        result = hungarian_assignment(interceptors, targets, None, geometries, threats)
+        result = hungarian_assignment(interceptors, targets, None, geometries, threats, cooperative_manager)
     elif algorithm == WTAAlgorithm.ROUND_ROBIN:
         result = round_robin_assignment(interceptors, targets)
     else:
-        result = greedy_nearest_assignment(interceptors, targets, geometries)
+        result = greedy_nearest_assignment(interceptors, targets, geometries, cooperative_manager)
 
     result.timestamp = time.time()
     return result

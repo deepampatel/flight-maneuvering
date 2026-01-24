@@ -31,7 +31,8 @@ from sim.evasion import EvasionType, EvasionConfig
 from sim.envelope import EnvelopeConfig, compute_engagement_envelope
 from sim.intercept import compute_intercept_geometry, compute_all_geometries, compute_all_geometries_multi
 from sim.threat import (
-    ThreatWeights, compute_threat_score, assess_all_threats, quick_threat_assessment
+    ThreatWeights, compute_threat_score, assess_all_threats, quick_threat_assessment,
+    ml_threat_assessment, hybrid_threat_assessment
 )
 from sim.recording import (
     RecordingManager, ReplayEngine, ReplayConfig,
@@ -42,6 +43,18 @@ from sim.assignment import (
     WTAAlgorithm, compute_assignment, compute_cost_matrix,
     greedy_nearest_assignment, greedy_threat_assignment, hungarian_assignment
 )
+from sim.environment import EnvironmentConfig, EnvironmentModel, create_wind_from_speed_direction
+from sim.kalman import KalmanFilter, KalmanState, KalmanConfig
+from sim.fusion import TrackFusionManager, FusionConfig, FusedTrack
+from sim.cooperation import (
+    CooperativeEngagementManager, EngagementZone, HandoffRequest,
+    HandoffStatus, HandoffReason
+)
+from sim.ml import (
+    ThreatModel, GuidanceModel, MLConfig,
+    get_model_registry, extract_threat_features,
+)
+from sim.ml.inference import ONNX_AVAILABLE
 
 
 # ============================================================
@@ -96,10 +109,37 @@ recording_manager = get_recording_manager()
 current_replay_engine: Optional[ReplayEngine] = None
 replay_task: Optional[asyncio.Task] = None
 
+# Phase 6: Global sensor states for track management
+sensor_states: dict = {}  # interceptor_id -> SensorState
+
 
 # ============================================================
 # API Models
 # ============================================================
+
+class Vec3Model(BaseModel):
+    """3D vector for API."""
+    x: float
+    y: float
+    z: float
+
+
+class PlannedEntityModel(BaseModel):
+    """Planned entity from mission planner."""
+    id: str
+    type: str  # "interceptor" or "target"
+    position: Vec3Model
+    velocity: Vec3Model
+
+
+class PlannedZoneModel(BaseModel):
+    """Planned zone from mission planner."""
+    id: str
+    name: str
+    center: Vec3Model
+    dimensions: Vec3Model
+    color: str = "#00ff00"
+
 
 class RunConfig(BaseModel):
     """Request body for starting a run."""
@@ -116,6 +156,16 @@ class RunConfig(BaseModel):
     num_targets: Optional[int] = None  # Override scenario's num_targets if set
     # Phase 5: WTA algorithm
     wta_algorithm: str = "hungarian"  # greedy_nearest, greedy_threat, hungarian, round_robin
+    # Phase 6: Environment configuration
+    wind_speed: float = 0.0  # Wind speed in m/s
+    wind_direction: float = 0.0  # Wind direction in degrees (0=North, 90=East)
+    wind_gusts: float = 0.0  # Gust amplitude in m/s
+    enable_drag: bool = False  # Enable aerodynamic drag
+    # Phase 6: Cooperative engagement
+    enable_cooperative: bool = False  # Enable cooperative engagement features
+    # Mission Planner: Custom entities
+    custom_entities: Optional[list[PlannedEntityModel]] = None
+    custom_zones: Optional[list[PlannedZoneModel]] = None
 
 
 class MonteCarloRequest(BaseModel):
@@ -216,6 +266,35 @@ class SensorConfigRequest(BaseModel):
 class WTAConfigRequest(BaseModel):
     """Request body for WTA algorithm configuration."""
     algorithm: str = "greedy_nearest"  # greedy_nearest, greedy_threat, hungarian, round_robin
+
+
+# Phase 6: Cooperative Engagement Models
+class EngagementZoneRequest(BaseModel):
+    """Request body for creating an engagement zone."""
+    name: str = "Zone Alpha"
+    center_x: float = 1500.0
+    center_y: float = 0.0
+    center_z: float = 600.0
+    width: float = 1000.0  # x dimension
+    depth: float = 1000.0  # y dimension
+    height: float = 500.0  # z dimension
+    rotation: float = 0.0  # heading in degrees
+    priority: int = 1
+    color: str = "#00ff00"
+
+
+class HandoffRequestModel(BaseModel):
+    """Request body for requesting a target handoff."""
+    from_interceptor: str
+    to_interceptor: str
+    target_id: str
+    reason: str = "manual"  # manual, fuel_low, out_of_envelope, zone_boundary, better_geometry
+
+
+class InterceptorZoneAssignment(BaseModel):
+    """Request body for assigning an interceptor to a zone."""
+    interceptor_id: str
+    zone_id: str
 
 
 # ============================================================
@@ -340,18 +419,31 @@ async def start_run(config: RunConfig):
     except ValueError:
         wta_algorithm = WTAAlgorithm.HUNGARIAN
 
+    # Phase 6: Create environment config if wind or drag enabled
+    environment_config = None
+    if config.wind_speed > 0 or config.enable_drag:
+        wind_velocity = create_wind_from_speed_direction(config.wind_speed, config.wind_direction)
+        environment_config = EnvironmentConfig(
+            wind_velocity=wind_velocity,
+            wind_gust_amplitude=config.wind_gusts,
+            enable_drag=config.enable_drag,
+        )
+
     # Create engine with config
     sim_config = SimConfig(
         dt=config.dt,
         max_time=config.max_time,
         kill_radius=config.kill_radius,
         real_time=config.real_time,
+        enable_cooperative=config.enable_cooperative,
     )
     current_engine = SimEngine(
         config=sim_config,
         guidance=guidance,
         evasion_type=evasion_type,
         wta_algorithm=wta_algorithm,
+        environment_config=environment_config,
+        enable_cooperative=config.enable_cooperative,
     )
 
     # Register broadcast handler
@@ -369,27 +461,44 @@ async def start_run(config: RunConfig):
             )
     current_engine.on_event(recording_handler)
 
-    # Setup scenario with multi-target support (Phase 5)
-    num_targets = config.num_targets if config.num_targets else scenario.get("num_targets", 1)
-    target_spacing = scenario.get("target_spacing", 300.0)
+    # Check if using custom entities from mission planner
+    if config.custom_entities and len(config.custom_entities) > 0:
+        # Use custom entity setup
+        current_engine.setup_custom_scenario(config.custom_entities)
+    else:
+        # Setup scenario with multi-target support (Phase 5)
+        num_targets = config.num_targets if config.num_targets else scenario.get("num_targets", 1)
+        target_spacing = scenario.get("target_spacing", 300.0)
 
-    current_engine.setup_scenario(
-        target_start=scenario["target_start"],
-        target_velocity=scenario["target_velocity"],
-        interceptor_start=scenario["interceptor_start"],
-        interceptor_velocity=scenario["interceptor_velocity"],
-        num_interceptors=config.num_interceptors,
-        num_targets=num_targets,
-        target_spacing=target_spacing,
-    )
+        current_engine.setup_scenario(
+            target_start=scenario["target_start"],
+            target_velocity=scenario["target_velocity"],
+            interceptor_start=scenario["interceptor_start"],
+            interceptor_velocity=scenario["interceptor_velocity"],
+            num_interceptors=config.num_interceptors,
+            num_targets=num_targets,
+            target_spacing=target_spacing,
+        )
+
+    # Create custom zones if provided
+    if config.custom_zones and current_engine.cooperative:
+        for zone in config.custom_zones:
+            current_engine.cooperative.create_zone(
+                name=zone.name,
+                center=Vec3(zone.center.x, zone.center.y, zone.center.z),
+                dimensions=Vec3(zone.dimensions.x, zone.dimensions.y, zone.dimensions.z),
+                color=zone.color,
+            )
 
     # Start simulation in background
     run_task = asyncio.create_task(current_engine.run())
 
     return {
         "run_id": current_engine.state.run_id,
-        "scenario": config.scenario,
+        "scenario": config.scenario if not config.custom_entities else "custom",
         "status": "started",
+        "num_interceptors": len([e for e in (config.custom_entities or []) if e.type == "interceptor"]) or config.num_interceptors,
+        "num_targets": len([e for e in (config.custom_entities or []) if e.type == "target"]) or (config.num_targets or 1),
     }
 
 
@@ -1015,6 +1124,692 @@ async def get_cost_matrix():
         "interceptor_ids": [i.id for i in state.interceptors],
         "target_ids": [t.id for t in state.targets],
         "cost_matrix": [[round(c, 3) for c in row] for row in cost_matrix]
+    }
+
+
+# ============================================================
+# Phase 6: Environment Endpoints
+# ============================================================
+
+class EnvironmentConfigRequest(BaseModel):
+    """Request body for environment configuration."""
+    wind_speed: float = 0.0  # Wind speed in m/s
+    wind_direction: float = 0.0  # Wind direction in degrees (0=North, 90=East)
+    wind_gust_amplitude: float = 0.0  # Gust amplitude in m/s
+    wind_gust_period: float = 5.0  # Gust period in seconds
+    enable_drag: bool = False  # Enable aerodynamic drag
+    drag_coefficient: float = 0.3  # Reference drag coefficient
+
+
+@app.get("/environment/config")
+async def get_environment_config():
+    """Get current environment configuration."""
+    if current_engine is None or current_engine.environment is None:
+        return {
+            "enabled": False,
+            "wind_velocity": {"x": 0, "y": 0, "z": 0},
+            "wind_gust_amplitude": 0.0,
+            "wind_gust_period": 5.0,
+            "enable_drag": False,
+            "drag_coefficient": 0.3,
+            "sea_level_density": 1.225,
+        }
+
+    env = current_engine.environment
+    return {
+        "enabled": True,
+        "wind_velocity": env.config.wind_velocity.to_dict(),
+        "wind_gust_amplitude": env.config.wind_gust_amplitude,
+        "wind_gust_period": env.config.wind_gust_period,
+        "enable_drag": env.config.enable_drag,
+        "drag_coefficient": env.config.reference_drag_coefficient,
+        "sea_level_density": env.config.sea_level_density,
+        "current_wind": env.state.current_wind.to_dict() if env.state else {"x": 0, "y": 0, "z": 0},
+    }
+
+
+@app.get("/environment/state")
+async def get_environment_state():
+    """Get current environment state (time-varying values)."""
+    if current_engine is None or current_engine.environment is None:
+        raise HTTPException(status_code=400, detail="No active simulation with environment")
+
+    env = current_engine.environment
+    state = current_engine.state
+
+    return {
+        "timestamp": state.sim_time if state else 0.0,
+        "current_wind": env.state.current_wind.to_dict(),
+        "wind_speed": env.state.current_wind.magnitude(),
+    }
+
+
+@app.post("/environment/configure")
+async def configure_environment(config: EnvironmentConfigRequest):
+    """
+    Configure environment for next simulation run.
+
+    Note: This returns the configuration that will be used.
+    The actual environment is created when a run starts.
+    """
+    wind_velocity = create_wind_from_speed_direction(config.wind_speed, config.wind_direction)
+
+    return {
+        "status": "ok",
+        "config": {
+            "wind_velocity": wind_velocity.to_dict(),
+            "wind_gust_amplitude": config.wind_gust_amplitude,
+            "wind_gust_period": config.wind_gust_period,
+            "enable_drag": config.enable_drag,
+            "drag_coefficient": config.drag_coefficient,
+        }
+    }
+
+
+# ============================================================
+# Phase 6: Kalman Filter & Sensor Fusion Endpoints
+# ============================================================
+
+# Global fusion manager (reset with each run)
+fusion_manager: Optional[TrackFusionManager] = None
+
+
+@app.get("/sensor/tracks")
+async def get_sensor_tracks():
+    """
+    Get detailed track information including Kalman state.
+
+    Returns tracks from each interceptor's sensor with uncertainty data.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    sensor_model = SensorModel()  # Use default config
+
+    tracks_by_sensor = {}
+    for interceptor in state.interceptors:
+        sensor_state = sensor_states.get(interceptor.id)
+        if sensor_state is None:
+            continue
+
+        sensor_tracks = []
+        for track_id, track in sensor_state.tracks.items():
+            track_data = {
+                "track_id": track_id,
+                "target_id": track.target_id,
+                "position": track.estimated_position.to_dict(),
+                "velocity": track.estimated_velocity.to_dict(),
+                "track_quality": track.track_quality,
+                "detections": track.detections,
+                "coasting": track.coasting,
+                "is_firm": track.is_firm,
+                "position_uncertainty": track.get_position_uncertainty(),
+            }
+
+            # Include Kalman state details if available
+            if track.kalman_state is not None:
+                track_data["kalman"] = track.kalman_state.to_dict()
+
+            sensor_tracks.append(track_data)
+
+        tracks_by_sensor[interceptor.id] = sensor_tracks
+
+    return {
+        "timestamp": state.sim_time,
+        "tracks_by_sensor": tracks_by_sensor,
+        "total_tracks": sum(len(t) for t in tracks_by_sensor.values()),
+    }
+
+
+@app.get("/sensor/fused-tracks")
+async def get_fused_tracks():
+    """
+    Get fused tracks combining data from multiple sensors.
+
+    Phase 6: Multi-sensor fusion using Covariance Intersection.
+    """
+    global fusion_manager
+
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+
+    # Create fusion manager if needed
+    if fusion_manager is None:
+        fusion_manager = TrackFusionManager()
+
+    # Add local tracks from each sensor to fusion manager
+    for interceptor_id, sensor_state in sensor_states.items():
+        for track_id, track in sensor_state.tracks.items():
+            if track.kalman_state is not None and track.is_firm:
+                fusion_manager.add_local_track(
+                    sensor_id=interceptor_id,
+                    track_id=f"{interceptor_id}_{track_id}",
+                    target_id=track.target_id,
+                    kalman_state=track.kalman_state,
+                    timestamp=state.sim_time,
+                    confidence=track.track_quality
+                )
+
+    # Fuse tracks
+    fused_tracks = fusion_manager.fuse_associated_tracks(state.sim_time)
+
+    return {
+        "timestamp": state.sim_time,
+        "fused_tracks": [ft.to_dict() for ft in fused_tracks],
+        "num_fused_tracks": len(fused_tracks),
+    }
+
+
+class KalmanConfigRequest(BaseModel):
+    """Request body for Kalman filter configuration."""
+    process_noise_pos: float = 1.0
+    process_noise_vel: float = 0.1
+    measurement_noise_pos: float = 50.0
+    initial_pos_variance: float = 100.0
+    initial_vel_variance: float = 25.0
+
+
+@app.post("/sensor/kalman/configure")
+async def configure_kalman(config: KalmanConfigRequest):
+    """
+    Configure Kalman filter parameters.
+
+    Note: Takes effect on next simulation run.
+    """
+    return {
+        "status": "ok",
+        "config": {
+            "process_noise_pos": config.process_noise_pos,
+            "process_noise_vel": config.process_noise_vel,
+            "measurement_noise_pos": config.measurement_noise_pos,
+            "initial_pos_variance": config.initial_pos_variance,
+            "initial_vel_variance": config.initial_vel_variance,
+        },
+        "note": "Configuration will apply to next simulation run"
+    }
+
+
+# ============================================================
+# Phase 6: Cooperative Engagement Endpoints
+# ============================================================
+
+@app.get("/cooperative/state")
+async def get_cooperative_state():
+    """
+    Get current cooperative engagement state.
+
+    Returns engagement zones, pending handoffs, and assignments.
+    """
+    if current_engine is None or current_engine.cooperative is None:
+        return {
+            "enabled": False,
+            "engagement_zones": [],
+            "pending_handoffs": [],
+            "completed_handoffs": [],
+            "interceptor_zones": {},
+            "target_assignments": {},
+        }
+
+    coop = current_engine.cooperative
+    state = coop.get_state()
+
+    return {
+        "enabled": True,
+        **state.to_dict()
+    }
+
+
+@app.post("/cooperative/zones")
+async def create_engagement_zone(request: EngagementZoneRequest):
+    """
+    Create a new engagement zone (killbox).
+
+    Zones define sectors for cooperative defense.
+    """
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No active simulation with cooperative engagement enabled"
+        )
+
+    coop = current_engine.cooperative
+    from sim.vector import Vec3
+
+    zone_id = coop.create_zone(
+        name=request.name,
+        center=Vec3(request.center_x, request.center_y, request.center_z),
+        dimensions=Vec3(request.width, request.depth, request.height),
+        rotation=request.rotation,
+        priority=request.priority,
+        color=request.color,
+    )
+
+    zone = coop.get_zone(zone_id)
+
+    return {
+        "status": "created",
+        "zone": zone.to_dict()
+    }
+
+
+@app.get("/cooperative/zones")
+async def list_engagement_zones():
+    """List all engagement zones."""
+    if current_engine is None or current_engine.cooperative is None:
+        return {"zones": []}
+
+    zones = current_engine.cooperative.get_zones()
+    return {"zones": [z.to_dict() for z in zones]}
+
+
+@app.get("/cooperative/zones/{zone_id}")
+async def get_engagement_zone(zone_id: str):
+    """Get details for a specific zone."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    zone = current_engine.cooperative.get_zone(zone_id)
+    if not zone:
+        raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
+
+    return zone.to_dict()
+
+
+@app.delete("/cooperative/zones/{zone_id}")
+async def delete_engagement_zone(zone_id: str):
+    """Delete an engagement zone."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.cooperative.delete_zone(zone_id):
+        return {"status": "deleted", "zone_id": zone_id}
+
+    raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
+
+
+@app.post("/cooperative/zones/assign")
+async def assign_interceptor_to_zone(assignment: InterceptorZoneAssignment):
+    """Assign an interceptor to an engagement zone."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.cooperative.assign_interceptor_to_zone(
+        assignment.interceptor_id,
+        assignment.zone_id
+    ):
+        return {
+            "status": "assigned",
+            "interceptor_id": assignment.interceptor_id,
+            "zone_id": assignment.zone_id
+        }
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Could not assign {assignment.interceptor_id} to {assignment.zone_id}"
+    )
+
+
+@app.post("/cooperative/zones/unassign/{interceptor_id}")
+async def unassign_interceptor_from_zone(interceptor_id: str):
+    """Remove an interceptor from its assigned zone."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.cooperative.unassign_interceptor(interceptor_id):
+        return {"status": "unassigned", "interceptor_id": interceptor_id}
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Interceptor {interceptor_id} is not assigned to any zone"
+    )
+
+
+@app.post("/cooperative/handoff/request")
+async def request_handoff(request: HandoffRequestModel):
+    """
+    Request a target handoff between interceptors.
+
+    Used for zone transitions or manual reassignment.
+    """
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    # Map reason string to enum
+    try:
+        reason = HandoffReason(request.reason)
+    except ValueError:
+        reason = HandoffReason.MANUAL
+
+    request_id = current_engine.cooperative.request_handoff(
+        from_interceptor=request.from_interceptor,
+        to_interceptor=request.to_interceptor,
+        target_id=request.target_id,
+        reason=reason,
+        current_time=current_engine.state.sim_time
+    )
+
+    if request_id:
+        return {
+            "status": "requested",
+            "request_id": request_id,
+            "from": request.from_interceptor,
+            "to": request.to_interceptor,
+            "target": request.target_id
+        }
+
+    raise HTTPException(
+        status_code=400,
+        detail="Handoff request rejected (cooldown, not assigned, or pending handoff exists)"
+    )
+
+
+@app.post("/cooperative/handoff/approve/{request_id}")
+async def approve_handoff(request_id: str):
+    """Approve a pending handoff request."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    if current_engine.cooperative.approve_handoff(
+        request_id,
+        current_engine.state.sim_time
+    ):
+        return {"status": "approved", "request_id": request_id}
+
+    raise HTTPException(status_code=400, detail=f"Could not approve handoff {request_id}")
+
+
+@app.post("/cooperative/handoff/reject/{request_id}")
+async def reject_handoff(request_id: str):
+    """Reject a pending handoff request."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.cooperative.reject_handoff(request_id):
+        return {"status": "rejected", "request_id": request_id}
+
+    raise HTTPException(status_code=400, detail=f"Could not reject handoff {request_id}")
+
+
+@app.post("/cooperative/handoff/execute/{request_id}")
+async def execute_handoff(request_id: str):
+    """Execute an approved handoff."""
+    if current_engine is None or current_engine.cooperative is None:
+        raise HTTPException(status_code=400, detail="Cooperative not enabled")
+
+    if current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    if current_engine.cooperative.execute_handoff(
+        request_id,
+        current_engine.state.sim_time
+    ):
+        return {"status": "executed", "request_id": request_id}
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Could not execute handoff {request_id} (not approved?)"
+    )
+
+
+@app.get("/cooperative/handoffs")
+async def list_handoffs():
+    """List pending and recent handoff requests."""
+    if current_engine is None or current_engine.cooperative is None:
+        return {
+            "pending": [],
+            "approved": [],
+            "completed": []
+        }
+
+    coop = current_engine.cooperative
+    return {
+        "pending": [h.to_dict() for h in coop.get_pending_handoffs()],
+        "approved": [h.to_dict() for h in coop.get_approved_handoffs()],
+        "completed": [h.to_dict() for h in coop.state.completed_handoffs[-10:]]
+    }
+
+
+# ============================================================
+# Phase 6.4: ML/AI Endpoints
+# ============================================================
+
+class MLModelLoadRequest(BaseModel):
+    """Request body for loading an ML model."""
+    model_id: str
+    model_path: str
+    model_type: str = "threat_assessment"  # "threat_assessment" or "guidance"
+    device: str = "cpu"
+    num_threads: int = 4
+
+
+class MLModelActivateRequest(BaseModel):
+    """Request body for activating a model."""
+    model_id: str
+    model_type: str = "threat_assessment"  # "threat_assessment" or "guidance"
+
+
+@app.get("/ml/status")
+async def get_ml_status():
+    """
+    Get ML subsystem status.
+
+    Returns whether ONNX runtime is available and loaded models.
+    """
+    registry = get_model_registry()
+
+    return {
+        "onnx_available": ONNX_AVAILABLE,
+        "models": registry.list_models(),
+        "active_threat_model": registry.active_threat_model,
+        "active_guidance_model": registry.active_guidance_model,
+    }
+
+
+@app.get("/ml/models")
+async def list_ml_models():
+    """
+    List all loaded ML models.
+
+    Returns model IDs, types, and status.
+    """
+    registry = get_model_registry()
+    return registry.list_models()
+
+
+@app.post("/ml/models/load")
+async def load_ml_model(request: MLModelLoadRequest):
+    """
+    Load an ML model from file.
+
+    Supports both threat assessment and guidance models in ONNX format.
+    """
+    if not ONNX_AVAILABLE:
+        raise HTTPException(
+            status_code=400,
+            detail="ONNX runtime not installed. Install with: pip install onnxruntime"
+        )
+
+    registry = get_model_registry()
+    config = MLConfig(
+        model_path=request.model_path,
+        model_type=request.model_type,
+        device=request.device,
+        num_threads=request.num_threads,
+    )
+
+    if request.model_type == "threat_assessment":
+        success = registry.load_threat_model(request.model_id, request.model_path, config)
+    elif request.model_type == "guidance":
+        success = registry.load_guidance_model(request.model_id, request.model_path, config)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown model type: {request.model_type}")
+
+    if success:
+        return {
+            "status": "loaded",
+            "model_id": request.model_id,
+            "model_type": request.model_type,
+            "path": request.model_path
+        }
+
+    raise HTTPException(status_code=400, detail=f"Failed to load model from {request.model_path}")
+
+
+@app.delete("/ml/models/{model_type}/{model_id}")
+async def unload_ml_model(model_type: str, model_id: str):
+    """
+    Unload an ML model.
+
+    Args:
+        model_type: "threat_assessment" or "guidance"
+        model_id: ID of the model to unload
+    """
+    registry = get_model_registry()
+
+    if model_type == "threat_assessment":
+        success = registry.unload_threat_model(model_id)
+    elif model_type == "guidance":
+        success = registry.unload_guidance_model(model_id)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown model type: {model_type}")
+
+    if success:
+        return {"status": "unloaded", "model_id": model_id}
+
+    raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+
+@app.post("/ml/models/activate")
+async def activate_ml_model(request: MLModelActivateRequest):
+    """
+    Set a model as the active model for its type.
+
+    The active model is used for predictions during simulation.
+    """
+    registry = get_model_registry()
+
+    if request.model_type == "threat_assessment":
+        if request.model_id not in registry.threat_models:
+            raise HTTPException(status_code=404, detail=f"Threat model {request.model_id} not found")
+        registry.active_threat_model = request.model_id
+    elif request.model_type == "guidance":
+        if request.model_id not in registry.guidance_models:
+            raise HTTPException(status_code=404, detail=f"Guidance model {request.model_id} not found")
+        registry.active_guidance_model = request.model_id
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown model type: {request.model_type}")
+
+    return {
+        "status": "activated",
+        "model_id": request.model_id,
+        "model_type": request.model_type
+    }
+
+
+@app.get("/ml/threat-assessment")
+async def get_ml_threat_assessment(mode: str = "ml"):
+    """
+    Get ML-based threat assessment for current simulation.
+
+    Args:
+        mode: "ml" (ML only), "rule" (rule-based only), or "hybrid" (blend)
+
+    Returns threat scores from the ML model or fallback if not available.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+    registry = get_model_registry()
+    model = registry.get_active_threat_model()
+
+    assessments = []
+    for interceptor in state.interceptors:
+        if mode == "ml":
+            if model is None or not model.model_loaded:
+                # Create fallback model (uses heuristic)
+                model = ThreatModel()
+
+            geometries = [
+                compute_intercept_geometry(interceptor, target)
+                for target in state.targets
+            ]
+            assessment = ml_threat_assessment(interceptor, state.targets, model, geometries)
+        elif mode == "hybrid":
+            geometries = [
+                compute_intercept_geometry(interceptor, target)
+                for target in state.targets
+            ]
+            assessment = hybrid_threat_assessment(
+                interceptor, state.targets, model,
+                ml_weight=0.5 if model and model.model_loaded else 0.0
+            )
+        else:  # rule
+            geometries = [
+                compute_intercept_geometry(interceptor, target)
+                for target in state.targets
+            ]
+            assessment = assess_all_threats(interceptor, state.targets, geometries)
+
+        assessments.append(assessment.to_dict())
+
+    return {
+        "mode": mode,
+        "model_active": model is not None and model.model_loaded if model else False,
+        "assessments": assessments
+    }
+
+
+@app.get("/ml/features/{interceptor_id}/{target_id}")
+async def get_ml_features(interceptor_id: str, target_id: str):
+    """
+    Get extracted ML features for a specific interceptor-target pair.
+
+    Useful for debugging and understanding model inputs.
+    """
+    if current_engine is None or current_engine.state is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    state = current_engine.state
+
+    # Find interceptor
+    interceptor = next((i for i in state.interceptors if i.id == interceptor_id), None)
+    if not interceptor:
+        raise HTTPException(status_code=404, detail=f"Interceptor {interceptor_id} not found")
+
+    # Find target
+    target = next((t for t in state.targets if t.id == target_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
+
+    # Extract features
+    from sim.ml.features import extract_threat_features, extract_guidance_features, ThreatFeatures, GuidanceFeatures
+    from sim.intercept import compute_intercept_geometry
+
+    geometry = compute_intercept_geometry(interceptor, target)
+    threat_features = extract_threat_features(interceptor, target, geometry)
+    guidance_features = extract_guidance_features(interceptor, target, geometry)
+
+    return {
+        "interceptor_id": interceptor_id,
+        "target_id": target_id,
+        "threat_features": {
+            "values": threat_features.to_numpy().tolist(),
+            "names": ThreatFeatures.feature_names(),
+        },
+        "guidance_features": {
+            "values": guidance_features.to_numpy().tolist(),
+            "names": GuidanceFeatures.feature_names(),
+        }
     }
 
 

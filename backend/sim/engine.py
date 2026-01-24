@@ -34,6 +34,8 @@ from .evasion import (
 from .assignment import (
     WTAAlgorithm, AssignmentResult, compute_assignment
 )
+from .environment import EnvironmentModel, EnvironmentConfig
+from .cooperation import CooperativeEngagementManager, HandoffReason
 
 
 class SimStatus(str, Enum):
@@ -58,6 +60,12 @@ class SimConfig:
     kill_radius: float = 150.0  # Intercept success radius (meters) - proximity fuse
     real_time: bool = True      # Try to match wall-clock time
 
+    # Environmental effects (Phase 6)
+    environment: Optional[EnvironmentConfig] = None  # None = no environment effects
+
+    # Cooperative engagement (Phase 6)
+    enable_cooperative: bool = False  # Enable cooperative engagement features
+
 
 @dataclass
 class SimState:
@@ -73,6 +81,12 @@ class SimState:
     intercepting_id: Optional[str] = None  # Which interceptor hit (if any)
     intercepted_target_id: Optional[str] = None  # Which target was hit (Phase 5)
     intercepted_pairs: List[tuple] = field(default_factory=list)  # All (interceptor_id, target_id) pairs that hit
+
+    # Phase 6: Environment state
+    environment: Optional['EnvironmentModel'] = None  # Reference to environment model
+
+    # Phase 6: Cooperative engagement state
+    cooperative: Optional['CooperativeEngagementManager'] = None
 
     # Legacy property for backward compatibility - single target
     @property
@@ -110,6 +124,17 @@ class SimState:
         # Include WTA assignments if available
         if assignments:
             event["assignments"] = assignments.to_dict()
+
+        # Include environment state (Phase 6)
+        if self.environment:
+            event["environment"] = {
+                "config": self.environment.config.to_dict(),
+                "current_wind": self.environment.state.current_wind.to_dict(),
+            }
+
+        # Include cooperative state (Phase 6)
+        if self.cooperative:
+            event["cooperative"] = self.cooperative.get_state().to_dict()
 
         return event
 
@@ -171,6 +196,8 @@ class SimEngine:
         evasion_type: EvasionType = EvasionType.NONE,
         evasion_config: Optional[EvasionConfig] = None,
         wta_algorithm: WTAAlgorithm = WTAAlgorithm.HUNGARIAN,
+        environment_config: Optional[EnvironmentConfig] = None,
+        enable_cooperative: bool = False,
     ):
         self.config = config or SimConfig()
         self.guidance = guidance or pure_pursuit_guidance
@@ -189,6 +216,18 @@ class SimEngine:
         # Phase 5: WTA setup
         self.wta_algorithm = wta_algorithm
         self.assignments: Optional[AssignmentResult] = None
+
+        # Phase 6: Environment setup
+        env_cfg = environment_config or self.config.environment
+        self.environment: Optional[EnvironmentModel] = (
+            EnvironmentModel(env_cfg) if env_cfg else None
+        )
+
+        # Phase 6: Cooperative engagement setup
+        self.enable_cooperative = enable_cooperative or self.config.enable_cooperative
+        self.cooperative: Optional[CooperativeEngagementManager] = (
+            CooperativeEngagementManager() if self.enable_cooperative else None
+        )
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -303,6 +342,10 @@ class SimEngine:
             t.id: EvasionState() for t in targets
         }
 
+        # Phase 6: Reset cooperative manager if enabled
+        if self.cooperative:
+            self.cooperative.reset()
+
         self.state = SimState(
             run_id=run_id or str(uuid.uuid4())[:8],
             sim_time=0.0,
@@ -311,15 +354,87 @@ class SimEngine:
             result=EngagementResult.PENDING,
             targets=targets,
             interceptors=interceptors,
+            environment=self.environment,  # Phase 6
+            cooperative=self.cooperative,  # Phase 6
         )
 
+        self._finalize_scenario_setup(targets, interceptors)
+
+    def setup_custom_scenario(
+        self,
+        entities: List[Dict],
+        run_id: Optional[str] = None,
+    ) -> None:
+        """
+        Initialize a scenario from custom entity placements (Mission Planner).
+
+        Args:
+            entities: List of entity dicts with id, type, position, velocity
+            run_id: Optional run ID
+        """
+        interceptors = []
+        targets = []
+
+        for e in entities:
+            pos = Vec3(e.position.x, e.position.y, e.position.z)
+            vel = Vec3(e.velocity.x, e.velocity.y, e.velocity.z)
+
+            if e.type == 'interceptor':
+                interceptors.append(create_interceptor(pos, vel, e.id))
+            elif e.type == 'target':
+                targets.append(create_target(pos, vel, e.id))
+
+        if not interceptors:
+            raise ValueError("At least one interceptor required")
+        if not targets:
+            raise ValueError("At least one target required")
+
+        # Reset evasion state for new scenario
+        self._evasion_state = EvasionState()
+        self._evasion_states: Dict[str, EvasionState] = {
+            t.id: EvasionState() for t in targets
+        }
+
+        # Phase 6: Reset cooperative manager if enabled
+        if self.cooperative:
+            self.cooperative.reset()
+
+        self.state = SimState(
+            run_id=run_id or str(uuid.uuid4())[:8],
+            sim_time=0.0,
+            tick=0,
+            status=SimStatus.READY,
+            result=EngagementResult.PENDING,
+            targets=targets,
+            interceptors=interceptors,
+            environment=self.environment,
+            cooperative=self.cooperative,
+        )
+
+        self._finalize_scenario_setup(targets, interceptors)
+
+    def _finalize_scenario_setup(
+        self,
+        targets: List[Entity],
+        interceptors: List[Entity],
+    ) -> None:
+        """Common setup finalization for both standard and custom scenarios."""
         # Phase 5: Compute initial WTA assignment (once at start)
         if len(targets) > 0 and len(interceptors) > 0:
             self.assignments = compute_assignment(
                 interceptors,
                 targets,
-                self.wta_algorithm
+                self.wta_algorithm,
+                cooperative_manager=self.cooperative,  # Phase 6: Pass cooperative manager
             )
+
+            # Phase 6: Initialize target assignments in cooperative manager
+            if self.cooperative and self.assignments:
+                for assignment in self.assignments.assignments:
+                    self.cooperative.set_target_assignment(
+                        assignment.target_id,
+                        assignment.interceptor_id
+                    )
         else:
             self.assignments = None
 
@@ -415,9 +530,10 @@ class SimEngine:
         This is the core loop that runs at 50 Hz:
         1. Apply target evasion maneuver (for each target)
         2. Apply guidance law to each interceptor (against assigned/nearest target)
-        3. Update entity physics
-        4. Check end conditions
-        5. Emit state event
+        3. Apply environmental forces (wind, drag) - Phase 6
+        4. Update entity physics
+        5. Check end conditions
+        6. Emit state event
         """
         if self.state is None or self.state.status != SimStatus.RUNNING:
             return
@@ -491,20 +607,76 @@ class SimEngine:
             accel_cmd = self.guidance(temp_state)
             interceptor.set_acceleration(accel_cmd)
 
-        # 3. PHYSICS: Update all entities
+        # 3. ENVIRONMENT: Apply environmental forces (Phase 6)
+        if self.environment:
+            self.environment.update(self.state.sim_time)
+            for entity in self.state.targets + self.state.interceptors:
+                env_accel = self.environment.get_total_environmental_acceleration(
+                    velocity=entity.velocity,
+                    position=entity.position,
+                    cross_section=entity.cross_section,
+                    mass=entity.mass,
+                    drag_coefficient=entity.drag_coefficient,
+                )
+                entity.acceleration = entity.acceleration + env_accel
+
+        # 4. COOPERATIVE: Check for zone-based handoffs (Phase 6)
+        if self.cooperative:
+            self.cooperative.update(self.state.sim_time)
+
+            # Check if any interceptor should hand off their target
+            for interceptor in self.state.interceptors:
+                if interceptor.id in intercepted_interceptor_ids:
+                    continue
+
+                # Get current assignment
+                assigned_target_id = None
+                if self.assignments:
+                    assigned_target_id = self.assignments.get_target_for_interceptor(interceptor.id)
+
+                if assigned_target_id:
+                    # Find target position
+                    target = next((t for t in self.state.targets if t.id == assigned_target_id), None)
+                    if target:
+                        # Check if handoff should be requested
+                        handoff_suggestion = self.cooperative.should_request_handoff(
+                            interceptor.id,
+                            assigned_target_id,
+                            target.position,
+                            self.state.sim_time
+                        )
+                        if handoff_suggestion:
+                            to_interceptor, reason = handoff_suggestion
+                            self.cooperative.request_handoff(
+                                from_interceptor=interceptor.id,
+                                to_interceptor=to_interceptor,
+                                target_id=assigned_target_id,
+                                reason=reason,
+                                current_time=self.state.sim_time
+                            )
+
+        # 5. PHYSICS: Update all entities (skip intercepted ones)
         for target in self.state.targets:
+            if target.id in intercepted_target_ids:
+                # Stop intercepted targets
+                target.velocity = Vec3.zero()
+                target.set_acceleration(Vec3.zero())
+                continue
             target.update(dt)
         for interceptor in self.state.interceptors:
+            if interceptor.id in intercepted_interceptor_ids:
+                # Already stopped above, but skip update too
+                continue
             interceptor.update(dt)
 
-        # 4. Update sim time
+        # 6. Update sim time
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 5. Check end conditions
+        # 7. Check end conditions
         self._check_end_conditions()
 
-        # 6. Emit state event (include WTA assignments)
+        # 8. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
     async def run(self) -> SimState:
