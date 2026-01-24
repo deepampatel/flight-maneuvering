@@ -9,7 +9,7 @@ dependencies = [
     "websockets>=12.0",
     "numpy>=1.26.0",
     "pydantic>=2.5.0",
-    "scipy>=1.11.0",  # Phase 5: Hungarian algorithm for WTA
+    "scipy>=1.11.0",  # Hungarian algorithm for WTA
 ]
 
 [project.optional-dependencies]
@@ -18,7 +18,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 ml = [
-    "onnxruntime>=1.16.0",  # Phase 6.4: ML inference
+    "onnxruntime>=1.16.0",  # ML inference
 ]
 
 [tool.uv]

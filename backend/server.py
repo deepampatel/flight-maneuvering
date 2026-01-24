@@ -21,7 +21,6 @@ from typing import Set, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 
 from sim.engine import SimEngine, SimConfig, load_scenario, SCENARIOS
 from sim.vector import Vec3
@@ -109,7 +108,7 @@ recording_manager = get_recording_manager()
 current_replay_engine: Optional[ReplayEngine] = None
 replay_task: Optional[asyncio.Task] = None
 
-# Phase 6: Global sensor states for track management
+# Global sensor states for track management
 sensor_states: dict = {}  # interceptor_id -> SensorState
 
 
@@ -161,31 +160,31 @@ class RunConfig(BaseModel):
     nav_constant: float = 4.0
     evasion: str = "none"  # none, constant_turn, weave, barrel_roll, random_jink
     num_interceptors: int = 1  # Number of interceptors (unlimited)
-    # Phase 5: Multi-target support
+    # Multi-target support
     num_targets: Optional[int] = None  # Override scenario's num_targets if set
-    # Phase 5: WTA algorithm
+    # WTA algorithm
     wta_algorithm: str = "hungarian"  # greedy_nearest, greedy_threat, hungarian, round_robin
-    # Phase 6: Environment configuration
+    # Environment configuration
     wind_speed: float = 0.0  # Wind speed in m/s
     wind_direction: float = 0.0  # Wind direction in degrees (0=North, 90=East)
     wind_gusts: float = 0.0  # Gust amplitude in m/s
     enable_drag: bool = False  # Enable aerodynamic drag
-    # Phase 6: Cooperative engagement
+    # Cooperative engagement
     enable_cooperative: bool = False  # Enable cooperative engagement features
     # Mission Planner: Custom entities
     custom_entities: Optional[list[PlannedEntityModel]] = None
     custom_zones: Optional[list[PlannedZoneModel]] = None
     custom_launchers: Optional[list[PlannedLauncherModel]] = None
-    # Phase 7: Swarm
+    # Swarm coordination
     enable_swarm: bool = False
     swarm_formation: Optional[str] = None
     swarm_spacing: Optional[float] = None
-    # Phase 7: HMT
+    # Human-Machine Teaming
     enable_hmt: bool = False
     hmt_authority_level: Optional[str] = None
-    # Phase 7: Datalink
+    # Datalink simulation
     enable_datalink: bool = False
-    # Phase 7: Terrain
+    # Terrain masking
     enable_terrain: bool = False
 
 
@@ -272,7 +271,6 @@ class RecordingStartRequest(BaseModel):
     scenario_name: Optional[str] = None
 
 
-# Phase 5: Sensor Configuration
 class SensorConfigRequest(BaseModel):
     """Request body for sensor configuration."""
     max_range: float = 10000.0
@@ -283,13 +281,11 @@ class SensorConfigRequest(BaseModel):
     angle_noise_std: float = 1.0
 
 
-# Phase 5: WTA Configuration
 class WTAConfigRequest(BaseModel):
     """Request body for WTA algorithm configuration."""
     algorithm: str = "greedy_nearest"  # greedy_nearest, greedy_threat, hungarian, round_robin
 
 
-# Phase 6: Cooperative Engagement Models
 class EngagementZoneRequest(BaseModel):
     """Request body for creating an engagement zone."""
     name: str = "Zone Alpha"
@@ -372,7 +368,6 @@ async def list_scenarios():
             "name": name,
             "description": info["description"],
             "evasion": info.get("evasion", "none").value if hasattr(info.get("evasion", "none"), "value") else "none",
-            # Phase 5: Include multi-target info
             "num_targets": info.get("num_targets", 1),
             "target_spacing": info.get("target_spacing", 300.0),
         }
@@ -440,7 +435,7 @@ async def start_run(config: RunConfig):
     except ValueError:
         wta_algorithm = WTAAlgorithm.HUNGARIAN
 
-    # Phase 6: Create environment config if wind or drag enabled
+    # Create environment config if wind or drag enabled
     environment_config = None
     if config.wind_speed > 0 or config.enable_drag:
         wind_velocity = create_wind_from_speed_direction(config.wind_speed, config.wind_direction)
@@ -450,7 +445,7 @@ async def start_run(config: RunConfig):
             enable_drag=config.enable_drag,
         )
 
-    # Phase 7: Check if scenario has swarm settings (auto-enable)
+    # Check if scenario has swarm settings (auto-enable)
     scenario_enable_swarm = scenario.get("enable_swarm", False)
     scenario_swarm_formation = scenario.get("swarm_formation")
     scenario_swarm_spacing = scenario.get("swarm_spacing")
@@ -467,7 +462,6 @@ async def start_run(config: RunConfig):
         kill_radius=config.kill_radius,
         real_time=config.real_time,
         enable_cooperative=config.enable_cooperative,
-        # Phase 7
         enable_swarm=effective_enable_swarm,
         enable_terrain=config.enable_terrain,
         enable_datalink=config.enable_datalink,
@@ -482,14 +476,14 @@ async def start_run(config: RunConfig):
         enable_cooperative=config.enable_cooperative,
     )
 
-    # Phase 7: Configure swarm if enabled
+    # Configure swarm if enabled
     if effective_enable_swarm and current_engine.swarm:
         if effective_swarm_formation:
             current_engine.swarm.set_formation(effective_swarm_formation)
         if effective_swarm_spacing:
             current_engine.swarm.config.spacing = effective_swarm_spacing
 
-    # Phase 7: Configure HMT if enabled
+    # Configure HMT if enabled
     if config.enable_hmt and current_engine.hmt:
         if config.hmt_authority_level:
             from sim.hmt import AuthorityLevel
@@ -529,11 +523,10 @@ async def start_run(config: RunConfig):
         # Use custom entity setup
         current_engine.setup_custom_scenario(config.custom_entities)
     else:
-        # Setup scenario with multi-target support (Phase 5)
+        # Setup scenario with multi-target support
         # Use config value if explicitly set, otherwise use scenario default
         num_targets = config.num_targets if config.num_targets is not None else scenario.get("num_targets", 1)
         target_spacing = scenario.get("target_spacing", 300.0)
-        # Phase 7: Swarm scenarios can specify num_interceptors
         # Scenario num_interceptors takes precedence (for swarm scenarios)
         num_interceptors = scenario.get("num_interceptors") or config.num_interceptors
         interceptor_spacing = scenario.get("interceptor_spacing", 100.0)
@@ -743,14 +736,13 @@ async def get_intercept_geometry():
     - Lead angle and collision course status
     - Time to intercept prediction
 
-    Phase 5: Updated to support multiple targets.
     """
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
 
     state = current_engine.state
 
-    # Phase 5: Use multi-target geometry computation
+    # Use multi-target geometry computation when applicable
     if len(state.targets) > 1:
         geometries = compute_all_geometries_multi(state.interceptors, state.targets)
     else:
@@ -777,7 +769,6 @@ async def get_threat_assessment(interceptor_id: str = None):
     Returns threat scores for all targets ranked by priority.
     Optionally filter by interceptor_id.
 
-    Phase 5: Updated to support multiple targets.
     """
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
@@ -1055,7 +1046,7 @@ async def get_replay_state():
 
 
 # ============================================================
-# Phase 5: Sensor Endpoints
+# Sensor Endpoints
 # ============================================================
 
 @app.get("/sensor/config")
@@ -1116,7 +1107,7 @@ async def get_sensor_detections():
 
 
 # ============================================================
-# Phase 5: Weapon-Target Assignment Endpoints
+# Weapon-Target Assignment Endpoints
 # ============================================================
 
 @app.get("/wta/algorithms")
@@ -1210,7 +1201,7 @@ async def get_cost_matrix():
 
 
 # ============================================================
-# Phase 6: Environment Endpoints
+# Environment Endpoints
 # ============================================================
 
 class EnvironmentConfigRequest(BaseModel):
@@ -1289,7 +1280,7 @@ async def configure_environment(config: EnvironmentConfigRequest):
 
 
 # ============================================================
-# Phase 6: Kalman Filter & Sensor Fusion Endpoints
+# Kalman Filter & Sensor Fusion Endpoints
 # ============================================================
 
 # Global fusion manager (reset with each run)
@@ -1349,7 +1340,7 @@ async def get_fused_tracks():
     """
     Get fused tracks combining data from multiple sensors.
 
-    Phase 6: Multi-sensor fusion using Covariance Intersection.
+    Multi-sensor fusion using Covariance Intersection.
     """
     global fusion_manager
 
@@ -1415,7 +1406,7 @@ async def configure_kalman(config: KalmanConfigRequest):
 
 
 # ============================================================
-# Phase 6: Cooperative Engagement Endpoints
+# Cooperative Engagement Endpoints
 # ============================================================
 
 @app.get("/cooperative/state")
@@ -1661,7 +1652,7 @@ async def list_handoffs():
 
 
 # ============================================================
-# Phase 6.4: ML/AI Endpoints
+# ML/AI Endpoints
 # ============================================================
 
 class MLModelLoadRequest(BaseModel):
@@ -1896,10 +1887,10 @@ async def get_ml_features(interceptor_id: str, target_id: str):
 
 
 # ============================================================
-# Phase 7: Swarm Endpoints
+# Swarm Endpoints
 # ============================================================
 
-# Import Phase 7 modules
+# Import optional modules
 try:
     from sim.swarm import SwarmConfig, FormationType, get_available_formations
     SWARM_AVAILABLE = True
@@ -1999,7 +1990,7 @@ async def set_swarm_leader(leader_id: str):
 
 
 # ============================================================
-# Phase 7: Terrain Endpoints
+# Terrain Endpoints
 # ============================================================
 
 @app.get("/terrain/status")
@@ -2067,7 +2058,7 @@ async def generate_terrain(seed: int = 42, amplitude: float = 500.0):
 
 
 # ============================================================
-# Phase 7: Datalink Endpoints
+# Datalink Endpoints
 # ============================================================
 
 class DatalinkConfigRequest(BaseModel):
@@ -2163,7 +2154,7 @@ async def remove_jammer(jammer_id: str):
 
 
 # ============================================================
-# Phase 7: Human-Machine Teaming Endpoints
+# Human-Machine Teaming Endpoints
 # ============================================================
 
 class HMTConfigRequest(BaseModel):
@@ -2279,12 +2270,12 @@ async def get_hmt_action_history(limit: int = 20):
 
 
 # ============================================================
-# Phase 7: Combined Status Endpoint
+# Combined Status Endpoint
 # ============================================================
 
 @app.get("/phase7/status")
 async def get_phase7_status():
-    """Get status of all Phase 7 subsystems."""
+    """Get status of all advanced subsystems."""
     return {
         "swarm": {
             "available": SWARM_AVAILABLE,

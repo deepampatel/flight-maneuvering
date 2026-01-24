@@ -19,17 +19,17 @@ import type {
   ThreatAssessment,
   RecordingMetadata,
   ReplayState,
-  // Phase 5
+  //
   WTAAlgorithm,
   AssignmentResult,
-  // Phase 6
+  //
   EnvironmentState,
   CooperativeState,
   EngagementZoneCreateRequest,
   HandoffRequestCreate,
-  // Phase 6.4: ML
+  // ML
   MLStatus,
-  // Phase 7
+  //
   SwarmStatus,
   SwarmConfig,
   FormationInfo,
@@ -53,16 +53,16 @@ interface ControlPanelProps {
     navConstant: number;
     evasion: string;
     numInterceptors: number;
-    numTargets?: number;  // Phase 5
-    wtaAlgorithm?: string;  // Phase 5
-    // Phase 6: Environment
+    numTargets?: number;  //
+    wtaAlgorithm?: string;  //
+    // Environment
     windSpeed?: number;
     windDirection?: number;
     windGusts?: number;
     enableDrag?: boolean;
-    // Phase 6: Cooperative
+    // Cooperative
     enableCooperative?: boolean;
-    // Phase 7
+    //
     enableSwarm?: boolean;
     swarmFormation?: FormationType;
     swarmSpacing?: number;
@@ -107,15 +107,15 @@ interface ControlPanelProps {
   onStopReplay: () => void;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
-  // Phase 5: WTA
+  // WTA
   wtaAlgorithms: WTAAlgorithm[];
   assignments: AssignmentResult | null;
   onFetchAssignments: (algorithm?: string) => void;
-  // Phase 6: Environment
+  // Environment
   environmentState: EnvironmentState | null;
-  // Phase 6: Sensor tracks
+  // Sensor tracks
   onFetchSensorTracks?: () => void;
-  // Phase 6: Cooperative Engagement
+  // Cooperative Engagement
   cooperativeState?: CooperativeState | null;
   onFetchCooperativeState?: () => void;
   onCreateEngagementZone?: (zone: EngagementZoneCreateRequest) => void;
@@ -129,16 +129,16 @@ interface ControlPanelProps {
   plannedZones?: { id: string; name: string; center: { x: number; y: number; z: number }; dimensions: { x: number; y: number; z: number }; color: string }[];
   onClearPlanner?: () => void;
   onRemovePlannedEntity?: (id: string) => void;
-  // Phase 6.4: ML
+  // ML
   mlStatus?: MLStatus | null;
   onFetchMLStatus?: () => void;
-  // Phase 7: Swarm
+  // Swarm
   swarmStatus?: SwarmStatus | null;
   formationTypes?: FormationInfo[];
   onFetchSwarmStatus?: () => void;
   onConfigureSwarm?: (config: Partial<SwarmConfig>) => void;
   onSetSwarmFormation?: (formation: FormationType) => void;
-  // Phase 7: HMT
+  // HMT
   hmtStatus?: HMTStatus | null;
   authorityLevels?: AuthorityLevelInfo[];
   pendingActions?: PendingAction[];
@@ -178,14 +178,14 @@ export function ControlPanel({
   onStopReplay,
   showAdvanced,
   onToggleAdvanced,
-  // Phase 5
+  //
   wtaAlgorithms,
   assignments,
   onFetchAssignments,
-  // Phase 6
+  //
   environmentState,
   onFetchSensorTracks,
-  // Phase 6: Cooperative
+  // Cooperative
   cooperativeState,
   onFetchCooperativeState,
   onCreateEngagementZone,
@@ -199,16 +199,16 @@ export function ControlPanel({
   plannedZones: _plannedZones,
   onClearPlanner: _onClearPlanner,
   onRemovePlannedEntity: _onRemovePlannedEntity,
-  // Phase 6.4: ML
+  // ML
   mlStatus,
   onFetchMLStatus,
-  // Phase 7: Swarm
+  // Swarm
   swarmStatus,
   formationTypes,
   onFetchSwarmStatus,
   onConfigureSwarm,
   onSetSwarmFormation,
-  // Phase 7: HMT
+  // HMT
   hmtStatus,
   authorityLevels,
   pendingActions,
@@ -235,23 +235,23 @@ export function ControlPanel({
   const [navConstant, setNavConstant] = useState(4.0);
   const [selectedEvasion, setSelectedEvasion] = useState('none');
   const [numInterceptors, setNumInterceptors] = useState(1);
-  const [numTargets, setNumTargets] = useState(1);  // Phase 5
-  const [selectedWTA, setSelectedWTA] = useState('hungarian');  // Phase 5: Default to optimal
-  // Phase 6: Environment state
+  const [numTargets, setNumTargets] = useState(1);  //
+  const [selectedWTA, setSelectedWTA] = useState('hungarian');  // Default to optimal
+  // Environment state
   const [windSpeed, setWindSpeed] = useState(0);  // m/s
   const [windDirection, setWindDirection] = useState(0);  // degrees
   const [windGusts, setWindGusts] = useState(0);  // m/s
   const [enableDrag, setEnableDrag] = useState(false);
-  // Phase 6: Cooperative state
+  // Cooperative state
   const [enableCooperative, setEnableCooperative] = useState(false);
-  // Phase 7: Swarm state
+  // Swarm state
   const [enableSwarm, setEnableSwarm] = useState(false);
   const [swarmFormation, setSwarmFormation] = useState<FormationType>('line_abreast');
   const [swarmSpacing, setSwarmSpacing] = useState(100);
-  // Phase 7: HMT state
+  // HMT state
   const [enableHmt, setEnableHmt] = useState(false);
   const [hmtAuthorityLevel, setHmtAuthorityLevel] = useState<AuthorityLevel>('human_on_loop');
-  // Phase 7: Other (enable via Swarm panel for simplicity)
+  // Other (enable via Swarm panel for simplicity)
   const [enableDatalink, _setEnableDatalink] = useState(false);
   const [enableTerrain, _setEnableTerrain] = useState(false);
   void _setEnableDatalink;
@@ -261,7 +261,7 @@ export function ControlPanel({
   const [activePanel, setActivePanel] = useState<string | null>(null);
 
   const isRunning = state?.status === 'running';
-  const targets = state?.entities.filter((e) => e.type === 'target') || [];  // Phase 5
+  const targets = state?.entities.filter((e) => e.type === 'target') || [];  //
   const target = targets[0];  // Backward compat
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
@@ -271,23 +271,23 @@ export function ControlPanel({
       const interval = setInterval(() => {
         onFetchInterceptGeometry();
         onFetchThreatAssessment();
-        // Phase 5: Also fetch WTA assignments for multi-target scenarios
+        // Also fetch WTA assignments for multi-target scenarios
         if (numTargets > 1) {
           onFetchAssignments(selectedWTA);
         }
-        // Phase 6: Fetch sensor tracks for uncertainty visualization
+        // Fetch sensor tracks for uncertainty visualization
         if (onFetchSensorTracks) {
           onFetchSensorTracks();
         }
-        // Phase 6: Fetch cooperative state
+        // Fetch cooperative state
         if (onFetchCooperativeState && enableCooperative) {
           onFetchCooperativeState();
         }
-        // Phase 7: Fetch swarm status
+        // Fetch swarm status
         if (onFetchSwarmStatus && enableSwarm) {
           onFetchSwarmStatus();
         }
-        // Phase 7: Fetch HMT status and pending actions
+        // Fetch HMT status and pending actions
         if (enableHmt) {
           if (onFetchHMTStatus) onFetchHMTStatus();
           if (onFetchPendingActions) onFetchPendingActions();
@@ -297,7 +297,7 @@ export function ControlPanel({
     }
   }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative, onFetchSwarmStatus, enableSwarm, onFetchHMTStatus, onFetchPendingActions, enableHmt]);
 
-  // Phase 5: Update numTargets and evasion when scenario changes
+  // Update numTargets and evasion when scenario changes
   useEffect(() => {
     const scenario = scenarios[selectedScenario];
     if (scenario) {
@@ -319,16 +319,16 @@ export function ControlPanel({
       navConstant,
       evasion: selectedEvasion,
       numInterceptors,
-      numTargets,  // Phase 5
-      wtaAlgorithm: selectedWTA,  // Phase 5
-      // Phase 6: Environment
+      numTargets,  //
+      wtaAlgorithm: selectedWTA,  //
+      // Environment
       windSpeed,
       windDirection,
       windGusts,
       enableDrag,
-      // Phase 6: Cooperative
+      // Cooperative
       enableCooperative,
-      // Phase 7
+      //
       enableSwarm,
       swarmFormation,
       swarmSpacing,

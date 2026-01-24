@@ -1,7 +1,7 @@
 """
 Sensor Modeling - Detection and Tracking
 
-Phase 5: This module simulates sensor capabilities and limitations:
+This module simulates sensor capabilities and limitations:
 
 - Detection range: Maximum distance at which targets can be detected
 - Field of View (FOV): Angular coverage of the sensor
@@ -65,7 +65,7 @@ class SensorConfig:
     track_init_detections: int = 3  # detections needed to establish track
     track_coast_time: float = 2.0   # seconds before track is dropped
 
-    # Phase 6: Kalman filter settings
+    # Kalman filter settings
     use_kalman: bool = True         # Use Kalman filter (vs alpha-beta)
     kalman_config: Optional[KalmanConfig] = None  # Kalman filter configuration
 
@@ -98,7 +98,7 @@ class Track:
     coasting: bool                    # True if track is coasting (no recent detection)
     is_firm: bool                     # True if track is confirmed (enough detections)
 
-    # Phase 6: Kalman filter state (optional)
+    # Kalman filter state (optional)
     kalman_state: Optional[KalmanState] = None
 
     def get_position_uncertainty(self) -> float:
@@ -127,13 +127,13 @@ class SensorModel:
     2. Calculate detection probability
     3. Generate noisy measurements
     4. Manage track quality
-    5. Phase 6: Kalman filtering for optimal state estimation
+    5. Kalman filtering for optimal state estimation
     """
 
     def __init__(self, config: SensorConfig = None):
         self.config = config or SensorConfig()
 
-        # Phase 6: Kalman filter instance
+        # Kalman filter instance
         if self.config.use_kalman:
             kalman_cfg = self.config.kalman_config or KalmanConfig(
                 measurement_noise_pos=self.config.range_noise_std
@@ -376,7 +376,7 @@ class SensorModel:
         Returns:
             Updated track
         """
-        # Phase 6: Use Kalman filter if enabled
+        # Use Kalman filter if enabled
         if self._kalman is not None:
             return self._update_track_kalman(track, detection, target_velocity, sim_time)
 

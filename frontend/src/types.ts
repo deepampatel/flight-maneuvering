@@ -18,7 +18,7 @@ export interface EntityState {
   velocity: Vec3;
   acceleration: Vec3;
   speed: number;
-  // Phase 6: Physical properties
+  // Physical properties
   mass?: number;
   cross_section?: number;
   drag_coefficient?: number;
@@ -145,7 +145,7 @@ export interface EnvelopeResults {
   points: EnvelopePoint[];
 }
 
-// Phase 4: Intercept Geometry types
+// Intercept Geometry types
 export interface InterceptGeometry {
   interceptor_id: string;
   target_id: string;
@@ -166,7 +166,7 @@ export interface InterceptGeometryResponse {
   geometries: InterceptGeometry[];
 }
 
-// Phase 4: Threat Assessment types
+// Threat Assessment types
 export interface ThreatScore {
   target_id: string;
   total_score: number;            // 0-100
@@ -195,7 +195,7 @@ export interface ThreatAssessmentResponse {
   assessments: ThreatAssessment[];
 }
 
-// Phase 4: Recording & Replay types
+// Recording & Replay types
 export interface RecordingMetadata {
   recording_id: string;
   created_at: number;
@@ -230,7 +230,7 @@ export interface ReplayState {
   result: string;
 }
 
-// Phase 5: Multi-Target Support
+// Multi-Target Support
 export interface SimStateEvent {
   type: 'state';
   run_id: string;
@@ -246,7 +246,7 @@ export interface SimStateEvent {
   intercepted_target_id?: string;
   intercepted_pairs?: [string, string][];
   assignments?: AssignmentResult;  // WTA assignments included in state
-  // Phase 7: HMT state from WebSocket
+  // HMT state from WebSocket
   hmt?: {
     authority_level: string;
     pending_count: number;
@@ -254,11 +254,11 @@ export interface SimStateEvent {
     workload: WorkloadMetrics;
     trust: TrustMetrics;
   };
-  // Phase 8: Launchers
+  // Launchers
   launchers?: LauncherState[];
 }
 
-// Phase 8: Launcher (Bogey) Types
+// Launcher (Bogey) Types
 export interface LauncherState {
   id: string;
   type: 'launcher';
@@ -301,7 +301,7 @@ export interface LaunchEvent {
   };
 }
 
-// Phase 5: Sensor Types
+// Sensor Types
 export interface SensorConfig {
   max_range: number;
   min_range: number;
@@ -329,7 +329,7 @@ export interface SensorDetectionsResponse {
   detections: Record<string, SensorDetection[]>;  // interceptor_id -> detections
 }
 
-// Phase 5: WTA (Weapon-Target Assignment) Types
+// WTA (Weapon-Target Assignment) Types
 export interface WTAAlgorithm {
   id: string;
   name: string;
@@ -368,7 +368,7 @@ export interface Scenario {
   target_spacing?: number;
 }
 
-// Phase 6: Environment Types
+// Environment Types
 export interface EnvironmentConfig {
   wind_velocity: Vec3;
   wind_gust_amplitude: number;
@@ -406,7 +406,7 @@ export interface SimStateEventWithEnvironment extends SimStateEvent {
   };
 }
 
-// Phase 6: Kalman Filter Types
+// Kalman Filter Types
 export interface KalmanState {
   position: Vec3;
   velocity: Vec3;
@@ -425,7 +425,7 @@ export interface KalmanConfig {
   initial_vel_variance: number;
 }
 
-// Phase 6: Enhanced Track with Kalman
+// Enhanced Track with Kalman
 export interface SensorTrack {
   track_id: string;
   target_id: string;
@@ -445,7 +445,7 @@ export interface SensorTracksResponse {
   total_tracks: number;
 }
 
-// Phase 6: Fused Track Types
+// Fused Track Types
 export interface FusedTrack {
   track_id: string;
   target_id: string;
@@ -465,7 +465,7 @@ export interface FusedTracksResponse {
   num_fused_tracks: number;
 }
 
-// Phase 6: Cooperative Engagement Types
+// Cooperative Engagement Types
 export interface EngagementZone {
   zone_id: string;
   name: string;
@@ -520,7 +520,7 @@ export interface HandoffRequestCreate {
   reason?: string;
 }
 
-// Phase 6.4: ML/AI Types
+// ML/AI Types
 export interface MLModelInfo {
   model_id: string;
   path: string;
@@ -580,7 +580,7 @@ export interface MLFeaturesResponse {
 }
 
 // =============================================================================
-// Phase 7: Swarm Types
+// Swarm Types
 // =============================================================================
 
 export type FormationType =
@@ -628,7 +628,7 @@ export interface FormationInfo {
 }
 
 // =============================================================================
-// Phase 7: Terrain Types
+// Terrain Types
 // =============================================================================
 
 export interface TerrainConfig {
@@ -659,7 +659,7 @@ export interface HeightmapData {
 }
 
 // =============================================================================
-// Phase 7: Datalink Types
+// Datalink Types
 // =============================================================================
 
 export interface DatalinkConfig {
@@ -704,7 +704,7 @@ export interface Jammer {
 }
 
 // =============================================================================
-// Phase 7: Human-Machine Teaming Types
+// Human-Machine Teaming Types
 // =============================================================================
 
 export type AuthorityLevel = 'full_auto' | 'human_on_loop' | 'human_in_loop' | 'manual';
@@ -781,7 +781,7 @@ export interface AuthorityLevelInfo {
 }
 
 // =============================================================================
-// Phase 7: Combined Status
+// Combined Status
 // =============================================================================
 
 export interface Phase7Status {

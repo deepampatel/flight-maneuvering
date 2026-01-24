@@ -29,7 +29,7 @@ function App() {
     runEnvelopeAnalysis,
     monteCarloLoading,
     envelopeLoading,
-    // Phase 4
+    //
     interceptGeometry,
     fetchInterceptGeometry,
     threatAssessment,
@@ -44,31 +44,31 @@ function App() {
     pauseReplay,
     resumeReplay,
     stopReplay,
-    // Phase 5
+    //
     wtaAlgorithms,
     assignments,
     fetchAssignments,
-    // Phase 6
+    //
     environmentState,
     sensorTracks,
     fetchSensorTracks,
-    // Phase 6: Cooperative Engagement
+    // Cooperative Engagement
     cooperativeState,
     fetchCooperativeState,
     createEngagementZone,
     deleteEngagementZone,
     assignInterceptorToZone,
     requestHandoff,
-    // Phase 6.4: ML
+    // ML
     mlStatus,
     fetchMLStatus,
-    // Phase 7: Swarm
+    // Swarm
     swarmStatus,
     formationTypes,
     fetchSwarmStatus,
     configureSwarm,
     setSwarmFormation,
-    // Phase 7: HMT
+    // HMT
     hmtStatus,
     authorityLevels,
     pendingActions,
@@ -175,14 +175,14 @@ function App() {
             onStopReplay={stopReplay}
             showAdvanced={showAdvanced}
             onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
-            // Phase 5
+            //
             wtaAlgorithms={wtaAlgorithms}
             assignments={assignments}
             onFetchAssignments={fetchAssignments}
-            // Phase 6
+            //
             environmentState={environmentState}
             onFetchSensorTracks={fetchSensorTracks}
-            // Phase 6: Cooperative Engagement
+            // Cooperative Engagement
             cooperativeState={cooperativeState}
             onFetchCooperativeState={fetchCooperativeState}
             onCreateEngagementZone={createEngagementZone}
@@ -196,16 +196,16 @@ function App() {
             plannedZones={missionPlanner.plannedZones}
             onClearPlanner={missionPlanner.clearAll}
             onRemovePlannedEntity={missionPlanner.removeEntity}
-            // Phase 6.4: ML
+            // ML
             mlStatus={mlStatus}
             onFetchMLStatus={fetchMLStatus}
-            // Phase 7: Swarm
+            // Swarm
             swarmStatus={swarmStatus}
             formationTypes={formationTypes}
             onFetchSwarmStatus={fetchSwarmStatus}
             onConfigureSwarm={configureSwarm}
             onSetSwarmFormation={setSwarmFormation}
-            // Phase 7: HMT
+            // HMT
             hmtStatus={hmtStatus}
             authorityLevels={authorityLevels}
             pendingActions={pendingActions}

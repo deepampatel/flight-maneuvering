@@ -31,12 +31,12 @@ import type {
   RecordingMetadata,
   ReplayState,
   ReplayConfig,
-  // Phase 5
+  //
   SensorDetection,
   AssignmentResult,
   WTAAlgorithm,
   CostMatrix,
-  // Phase 6
+  //
   EnvironmentState,
   SensorTrack,
   SensorTracksResponse,
@@ -45,9 +45,9 @@ import type {
   CooperativeState,
   EngagementZoneCreateRequest,
   HandoffRequestCreate,
-  // Phase 6.4: ML
+  // ML
   MLStatus,
-  // Phase 7
+  //
   SwarmStatus,
   SwarmConfig,
   FormationInfo,
@@ -96,29 +96,29 @@ interface RunOptions {
   navConstant: number;
   evasion?: string;
   numInterceptors?: number;
-  numTargets?: number;  // Phase 5: Multi-target support
-  wtaAlgorithm?: string;  // Phase 5: WTA algorithm selection
-  // Phase 6: Environment
+  numTargets?: number;  // Multi-target support
+  wtaAlgorithm?: string;  // WTA algorithm selection
+  // Environment
   windSpeed?: number;
   windDirection?: number;
   windGusts?: number;
   enableDrag?: boolean;
-  // Phase 6: Cooperative
+  // Cooperative
   enableCooperative?: boolean;
   // Mission Planner: Custom entities
   customEntities?: PlannedEntity[];
   customZones?: PlannedZone[];
   customLaunchers?: PlannedLauncher[];
-  // Phase 7: Swarm
+  // Swarm
   enableSwarm?: boolean;
   swarmFormation?: FormationType;
   swarmSpacing?: number;
-  // Phase 7: HMT
+  // HMT
   enableHmt?: boolean;
   hmtAuthorityLevel?: AuthorityLevel;
-  // Phase 7: Datalink
+  // Datalink
   enableDatalink?: boolean;
-  // Phase 7: Terrain
+  // Terrain
   enableTerrain?: boolean;
 }
 
@@ -151,60 +151,60 @@ interface UseSimulationReturn {
   runEnvelopeAnalysis: (config: Partial<EnvelopeConfig>) => Promise<EnvelopeResults>;
   monteCarloLoading: boolean;
   envelopeLoading: boolean;
-  // Phase 4: Intercept Geometry
+  // Intercept Geometry
   interceptGeometry: InterceptGeometry[] | null;
   fetchInterceptGeometry: () => Promise<void>;
-  // Phase 4: Threat Assessment
+  // Threat Assessment
   threatAssessment: ThreatAssessment[] | null;
   fetchThreatAssessment: () => Promise<void>;
-  // Phase 4: Recording
+  // Recording
   isRecording: boolean;
   recordings: RecordingMetadata[];
   startRecording: () => Promise<string>;
   stopRecording: () => Promise<void>;
   refreshRecordings: () => Promise<void>;
   deleteRecording: (recordingId: string) => Promise<void>;
-  // Phase 4: Replay
+  // Replay
   replayState: ReplayState | null;
   startReplay: (recordingId: string, config?: Partial<ReplayConfig>) => Promise<void>;
   pauseReplay: () => Promise<void>;
   resumeReplay: () => Promise<void>;
   seekReplay: (tick: number) => Promise<void>;
   stopReplay: () => Promise<void>;
-  // Phase 5: Sensor Detections
+  // Sensor Detections
   sensorDetections: Record<string, SensorDetection[]> | null;
   fetchSensorDetections: () => Promise<void>;
-  // Phase 5: WTA
+  // WTA
   wtaAlgorithms: WTAAlgorithm[];
   assignments: AssignmentResult | null;
   fetchAssignments: (algorithm?: string) => Promise<void>;
   costMatrix: CostMatrix | null;
   fetchCostMatrix: () => Promise<void>;
-  // Phase 6: Environment
+  // Environment
   environmentState: EnvironmentState | null;
   fetchEnvironmentState: () => Promise<void>;
-  // Phase 6: Kalman & Fusion
+  // Kalman & Fusion
   sensorTracks: SensorTrack[] | null;
   fusedTracks: FusedTrack[] | null;
   fetchSensorTracks: () => Promise<void>;
   fetchFusedTracks: () => Promise<void>;
-  // Phase 6: Cooperative Engagement
+  // Cooperative Engagement
   cooperativeState: CooperativeState | null;
   fetchCooperativeState: () => Promise<void>;
   createEngagementZone: (zone: EngagementZoneCreateRequest) => Promise<void>;
   deleteEngagementZone: (zoneId: string) => Promise<void>;
   assignInterceptorToZone: (interceptorId: string, zoneId: string) => Promise<void>;
   requestHandoff: (request: HandoffRequestCreate) => Promise<void>;
-  // Phase 6.4: ML
+  // ML
   mlStatus: MLStatus | null;
   fetchMLStatus: () => Promise<void>;
-  // Phase 7: Swarm
+  // Swarm
   swarmStatus: SwarmStatus | null;
   formationTypes: FormationInfo[];
   fetchSwarmStatus: () => Promise<void>;
   configureSwarm: (config: Partial<SwarmConfig>) => Promise<void>;
   setSwarmFormation: (formation: FormationType) => Promise<void>;
-  // Phase 7: HMT
+  // HMT
   hmtStatus: HMTStatus | null;
   authorityLevels: AuthorityLevelInfo[];
   pendingActions: PendingAction[];
@@ -214,13 +214,13 @@ interface UseSimulationReturn {
   rejectAction: (actionId: string, reason?: string) => Promise<void>;
   setAuthorityLevel: (level: AuthorityLevel) => Promise<void>;
   configureHMT: (config: Partial<HMTConfig>) => Promise<void>;
-  // Phase 7: Datalink
+  // Datalink
   datalinkStatus: DatalinkStatus | null;
   fetchDatalinkStatus: () => Promise<void>;
-  // Phase 7: Terrain
+  // Terrain
   terrainStatus: TerrainStatus | null;
   fetchTerrainStatus: () => Promise<void>;
-  // Phase 7: Combined status
+  // Combined status
   phase7Status: Phase7Status | null;
   fetchPhase7Status: () => Promise<void>;
   // Launchers
@@ -235,39 +235,39 @@ export function useSimulation(): UseSimulationReturn {
   const [evasionTypes, setEvasionTypes] = useState<EvasionType[]>([]);
   const [monteCarloLoading, setMonteCarloLoading] = useState(false);
   const [envelopeLoading, setEnvelopeLoading] = useState(false);
-  // Phase 4: Intercept Geometry & Threat Assessment
+  // Intercept Geometry & Threat Assessment
   const [interceptGeometry, setInterceptGeometry] = useState<InterceptGeometry[] | null>(null);
   const [threatAssessment, setThreatAssessment] = useState<ThreatAssessment[] | null>(null);
-  // Phase 4: Recording & Replay
+  // Recording & Replay
   const [isRecording, setIsRecording] = useState(false);
   const [recordings, setRecordings] = useState<RecordingMetadata[]>([]);
   const [replayState, setReplayState] = useState<ReplayState | null>(null);
-  // Phase 5: Sensors & WTA
+  // Sensors & WTA
   const [sensorDetections, setSensorDetections] = useState<Record<string, SensorDetection[]> | null>(null);
   const [wtaAlgorithms, setWtaAlgorithms] = useState<WTAAlgorithm[]>([]);
   const [assignments, setAssignments] = useState<AssignmentResult | null>(null);
   const [costMatrix, setCostMatrix] = useState<CostMatrix | null>(null);
-  // Phase 6: Environment
+  // Environment
   const [environmentState, setEnvironmentState] = useState<EnvironmentState | null>(null);
-  // Phase 6: Kalman & Fusion
+  // Kalman & Fusion
   const [sensorTracks, setSensorTracks] = useState<SensorTrack[] | null>(null);
   const [fusedTracks, setFusedTracks] = useState<FusedTrack[] | null>(null);
-  // Phase 6: Cooperative Engagement
+  // Cooperative Engagement
   const [cooperativeState, setCooperativeState] = useState<CooperativeState | null>(null);
-  // Phase 6.4: ML
+  // ML
   const [mlStatus, setMLStatus] = useState<MLStatus | null>(null);
-  // Phase 7: Swarm
+  // Swarm
   const [swarmStatus, setSwarmStatus] = useState<SwarmStatus | null>(null);
   const [formationTypes, setFormationTypes] = useState<FormationInfo[]>([]);
-  // Phase 7: HMT
+  // HMT
   const [hmtStatus, setHMTStatus] = useState<HMTStatus | null>(null);
   const [authorityLevels, setAuthorityLevels] = useState<AuthorityLevelInfo[]>([]);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
-  // Phase 7: Datalink
+  // Datalink
   const [datalinkStatus, setDatalinkStatus] = useState<DatalinkStatus | null>(null);
-  // Phase 7: Terrain
+  // Terrain
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
-  // Phase 7: Combined
+  // Combined
   const [phase7Status, setPhase7Status] = useState<Phase7Status | null>(null);
   // Launchers
   const [launchers, setLaunchers] = useState<LauncherState[] | null>(null);
@@ -292,25 +292,25 @@ export function useSimulation(): UseSimulationReturn {
       .then((data) => setEvasionTypes(data.evasion_types))
       .catch(console.error);
 
-    // Phase 5: Fetch WTA algorithms
+    // Fetch WTA algorithms
     fetch(`${API_URL}/wta/algorithms`)
       .then((res) => res.json())
       .then((data) => setWtaAlgorithms(data.algorithms))
       .catch(console.error);
 
-    // Phase 7: Fetch formation types
+    // Fetch formation types
     fetch(`${API_URL}/swarm/formations`)
       .then((res) => res.json())
       .then((data) => setFormationTypes(data.formations || []))
       .catch(console.error);
 
-    // Phase 7: Fetch authority levels
+    // Fetch authority levels
     fetch(`${API_URL}/hmt/authority-levels`)
       .then((res) => res.json())
       .then((data) => setAuthorityLevels(data.authority_levels || []))
       .catch(console.error);
 
-    // Phase 7: Fetch combined status
+    // Fetch combined status
     fetch(`${API_URL}/phase7/status`)
       .then((res) => res.json())
       .then((data) => setPhase7Status(data))
@@ -334,11 +334,11 @@ export function useSimulation(): UseSimulationReturn {
 
         if (data.type === 'state') {
           setState(data);
-          // Phase 5: Extract assignments from state event if present
+          // Extract assignments from state event if present
           if (data.assignments) {
             setAssignments(data.assignments);
           }
-          // Phase 7: Extract HMT pending actions from state event
+          // Extract HMT pending actions from state event
           if (data.hmt?.pending_actions) {
             setPendingActions(data.hmt.pending_actions);
           }
@@ -390,7 +390,7 @@ export function useSimulation(): UseSimulationReturn {
   // Start a new simulation run
   const startRun = useCallback(async (options: RunOptions) => {
     setState(null); // Clear previous state
-    // Phase 5: Clear sensor/WTA state
+    // Clear sensor/WTA state
     setSensorDetections(null);
     setAssignments(null);
     setCostMatrix(null);
@@ -404,30 +404,30 @@ export function useSimulation(): UseSimulationReturn {
         nav_constant: options.navConstant,
         evasion: options.evasion || 'none',
         num_interceptors: options.numInterceptors || 1,
-        num_targets: options.numTargets,  // Phase 5: Multi-target
-        wta_algorithm: options.wtaAlgorithm || 'hungarian',  // Phase 5: WTA algorithm
+        num_targets: options.numTargets,  // Multi-target
+        wta_algorithm: options.wtaAlgorithm || 'hungarian',  // WTA algorithm
         real_time: true,
-        // Phase 6: Environment
+        // Environment
         wind_speed: options.windSpeed || 0,
         wind_direction: options.windDirection || 0,
         wind_gusts: options.windGusts || 0,
         enable_drag: options.enableDrag || false,
-        // Phase 6: Cooperative
+        // Cooperative
         enable_cooperative: options.enableCooperative || false,
         // Mission Planner: Custom entities
         custom_entities: options.customEntities,
         custom_zones: options.customZones,
         custom_launchers: options.customLaunchers,
-        // Phase 7: Swarm
+        // Swarm
         enable_swarm: options.enableSwarm || false,
         swarm_formation: options.swarmFormation,
         swarm_spacing: options.swarmSpacing,
-        // Phase 7: HMT
+        // HMT
         enable_hmt: options.enableHmt || false,
         hmt_authority_level: options.hmtAuthorityLevel,
-        // Phase 7: Datalink
+        // Datalink
         enable_datalink: options.enableDatalink || false,
-        // Phase 7: Terrain
+        // Terrain
         enable_terrain: options.enableTerrain || false,
       }),
     });
@@ -534,7 +534,7 @@ export function useSimulation(): UseSimulationReturn {
     []
   );
 
-  // Phase 4: Fetch intercept geometry
+  // Fetch intercept geometry
   const fetchInterceptGeometry = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/intercept-geometry`);
@@ -547,7 +547,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Fetch threat assessment
+  // Fetch threat assessment
   const fetchThreatAssessment = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/threat-assessment`);
@@ -560,7 +560,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Start recording
+  // Start recording
   const startRecording = useCallback(async (): Promise<string> => {
     const response = await fetch(`${API_URL}/recordings/start`, {
       method: 'POST',
@@ -574,7 +574,7 @@ export function useSimulation(): UseSimulationReturn {
     return data.recording_id;
   }, []);
 
-  // Phase 4: Stop recording
+  // Stop recording
   const stopRecording = useCallback(async () => {
     const response = await fetch(`${API_URL}/recordings/stop`, {
       method: 'POST',
@@ -589,7 +589,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Refresh recordings list
+  // Refresh recordings list
   const refreshRecordings = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/recordings`);
@@ -600,7 +600,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Delete recording
+  // Delete recording
   const deleteRecording = useCallback(async (recordingId: string) => {
     await fetch(`${API_URL}/recordings/${recordingId}`, {
       method: 'DELETE',
@@ -611,7 +611,7 @@ export function useSimulation(): UseSimulationReturn {
     setRecordings(data.recordings);
   }, []);
 
-  // Phase 4: Start replay
+  // Start replay
   const startReplay = useCallback(async (recordingId: string, config?: Partial<ReplayConfig>) => {
     setState(null); // Clear previous state
     const response = await fetch(`${API_URL}/replay/${recordingId}/start`, {
@@ -630,7 +630,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Pause replay
+  // Pause replay
   const pauseReplay = useCallback(async () => {
     await fetch(`${API_URL}/replay/pause`, { method: 'POST' });
     // Update replay state
@@ -641,7 +641,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Resume replay
+  // Resume replay
   const resumeReplay = useCallback(async () => {
     await fetch(`${API_URL}/replay/resume`, { method: 'POST' });
     const response = await fetch(`${API_URL}/replay/state`);
@@ -651,12 +651,12 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 4: Seek replay
+  // Seek replay
   const seekReplay = useCallback(async (tick: number) => {
     await fetch(`${API_URL}/replay/seek?tick=${tick}`, { method: 'POST' });
   }, []);
 
-  // Phase 4: Stop replay
+  // Stop replay
   const stopReplay = useCallback(async () => {
     await fetch(`${API_URL}/replay/stop`, { method: 'POST' });
     setReplayState(null);
@@ -667,7 +667,7 @@ export function useSimulation(): UseSimulationReturn {
     refreshRecordings();
   }, [refreshRecordings]);
 
-  // Phase 5: Fetch sensor detections
+  // Fetch sensor detections
   const fetchSensorDetections = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/sensor/detections`);
@@ -680,7 +680,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 5: Fetch WTA assignments
+  // Fetch WTA assignments
   const fetchAssignments = useCallback(async (algorithm: string = 'greedy_nearest') => {
     try {
       const response = await fetch(`${API_URL}/wta/assignments?algorithm=${algorithm}`);
@@ -693,7 +693,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 5: Fetch cost matrix
+  // Fetch cost matrix
   const fetchCostMatrix = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/wta/cost-matrix`);
@@ -706,7 +706,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 6: Fetch environment state
+  // Fetch environment state
   const fetchEnvironmentState = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/environment/config`);
@@ -719,7 +719,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 6: Fetch sensor tracks with Kalman state
+  // Fetch sensor tracks with Kalman state
   const fetchSensorTracks = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/sensor/tracks`);
@@ -737,7 +737,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 6: Fetch fused tracks
+  // Fetch fused tracks
   const fetchFusedTracks = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/sensor/fused-tracks`);
@@ -750,7 +750,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 6: Fetch cooperative state
+  // Fetch cooperative state
   const fetchCooperativeState = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/cooperative/state`);
@@ -763,7 +763,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 6: Create engagement zone
+  // Create engagement zone
   const createEngagementZone = useCallback(async (zone: EngagementZoneCreateRequest) => {
     try {
       const response = await fetch(`${API_URL}/cooperative/zones`, {
@@ -780,7 +780,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchCooperativeState]);
 
-  // Phase 6: Delete engagement zone
+  // Delete engagement zone
   const deleteEngagementZone = useCallback(async (zoneId: string) => {
     try {
       const response = await fetch(`${API_URL}/cooperative/zones/${zoneId}`, {
@@ -795,7 +795,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchCooperativeState]);
 
-  // Phase 6: Assign interceptor to zone
+  // Assign interceptor to zone
   const assignInterceptorToZone = useCallback(async (interceptorId: string, zoneId: string) => {
     try {
       const response = await fetch(`${API_URL}/cooperative/zones/assign`, {
@@ -815,7 +815,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchCooperativeState]);
 
-  // Phase 6: Request handoff
+  // Request handoff
   const requestHandoff = useCallback(async (request: HandoffRequestCreate) => {
     try {
       const response = await fetch(`${API_URL}/cooperative/handoff/request`, {
@@ -832,7 +832,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchCooperativeState]);
 
-  // Phase 6.4: Fetch ML status
+  // Fetch ML status
   const fetchMLStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/ml/status`);
@@ -845,7 +845,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Fetch swarm status
+  // Fetch swarm status
   const fetchSwarmStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/swarm/status`);
@@ -858,7 +858,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Configure swarm
+  // Configure swarm
   const configureSwarm = useCallback(async (config: Partial<SwarmConfig>) => {
     try {
       const response = await fetch(`${API_URL}/swarm/configure`, {
@@ -874,7 +874,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchSwarmStatus]);
 
-  // Phase 7: Set swarm formation
+  // Set swarm formation
   const setSwarmFormation = useCallback(async (formation: FormationType) => {
     try {
       const response = await fetch(`${API_URL}/swarm/formation`, {
@@ -890,7 +890,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchSwarmStatus]);
 
-  // Phase 7: Fetch HMT status
+  // Fetch HMT status
   const fetchHMTStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/hmt/status`);
@@ -903,7 +903,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Fetch pending actions
+  // Fetch pending actions
   const fetchPendingActions = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/hmt/pending`);
@@ -916,7 +916,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Approve action
+  // Approve action
   const approveAction = useCallback(async (actionId: string, reason?: string) => {
     try {
       const response = await fetch(`${API_URL}/hmt/approve/${actionId}`, {
@@ -933,7 +933,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchPendingActions, fetchHMTStatus]);
 
-  // Phase 7: Reject action
+  // Reject action
   const rejectAction = useCallback(async (actionId: string, reason?: string) => {
     try {
       const response = await fetch(`${API_URL}/hmt/reject/${actionId}`, {
@@ -950,7 +950,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchPendingActions, fetchHMTStatus]);
 
-  // Phase 7: Set authority level
+  // Set authority level
   const setAuthorityLevel = useCallback(async (level: AuthorityLevel) => {
     try {
       const response = await fetch(`${API_URL}/hmt/authority`, {
@@ -966,7 +966,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchHMTStatus]);
 
-  // Phase 7: Configure HMT
+  // Configure HMT
   const configureHMT = useCallback(async (config: Partial<HMTConfig>) => {
     try {
       const response = await fetch(`${API_URL}/hmt/configure`, {
@@ -982,7 +982,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, [fetchHMTStatus]);
 
-  // Phase 7: Fetch datalink status
+  // Fetch datalink status
   const fetchDatalinkStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/datalink/status`);
@@ -995,7 +995,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Fetch terrain status
+  // Fetch terrain status
   const fetchTerrainStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/terrain/status`);
@@ -1008,7 +1008,7 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Phase 7: Fetch combined Phase 7 status
+  // Fetch combined Phase 7 status
   const fetchPhase7Status = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/phase7/status`);
@@ -1034,60 +1034,60 @@ export function useSimulation(): UseSimulationReturn {
     runEnvelopeAnalysis,
     monteCarloLoading,
     envelopeLoading,
-    // Phase 4: Intercept Geometry
+    // Intercept Geometry
     interceptGeometry,
     fetchInterceptGeometry,
-    // Phase 4: Threat Assessment
+    // Threat Assessment
     threatAssessment,
     fetchThreatAssessment,
-    // Phase 4: Recording
+    // Recording
     isRecording,
     recordings,
     startRecording,
     stopRecording,
     refreshRecordings,
     deleteRecording,
-    // Phase 4: Replay
+    // Replay
     replayState,
     startReplay,
     pauseReplay,
     resumeReplay,
     seekReplay,
     stopReplay,
-    // Phase 5: Sensor Detections
+    // Sensor Detections
     sensorDetections,
     fetchSensorDetections,
-    // Phase 5: WTA
+    // WTA
     wtaAlgorithms,
     assignments,
     fetchAssignments,
     costMatrix,
     fetchCostMatrix,
-    // Phase 6: Environment
+    // Environment
     environmentState,
     fetchEnvironmentState,
-    // Phase 6: Kalman & Fusion
+    // Kalman & Fusion
     sensorTracks,
     fusedTracks,
     fetchSensorTracks,
     fetchFusedTracks,
-    // Phase 6: Cooperative Engagement
+    // Cooperative Engagement
     cooperativeState,
     fetchCooperativeState,
     createEngagementZone,
     deleteEngagementZone,
     assignInterceptorToZone,
     requestHandoff,
-    // Phase 6.4: ML
+    // ML
     mlStatus,
     fetchMLStatus,
-    // Phase 7: Swarm
+    // Swarm
     swarmStatus,
     formationTypes,
     fetchSwarmStatus,
     configureSwarm,
     setSwarmFormation,
-    // Phase 7: HMT
+    // HMT
     hmtStatus,
     authorityLevels,
     pendingActions,
@@ -1097,13 +1097,13 @@ export function useSimulation(): UseSimulationReturn {
     rejectAction,
     setAuthorityLevel,
     configureHMT,
-    // Phase 7: Datalink
+    // Datalink
     datalinkStatus,
     fetchDatalinkStatus,
-    // Phase 7: Terrain
+    // Terrain
     terrainStatus,
     fetchTerrainStatus,
-    // Phase 7: Combined
+    // Combined
     phase7Status,
     fetchPhase7Status,
     // Launchers

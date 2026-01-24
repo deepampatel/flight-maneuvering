@@ -37,7 +37,7 @@ from .assignment import (
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
 
-# Phase 7 imports (optional - features disabled by default)
+# Optional subsystem imports (features disabled by default)
 try:
     from .swarm import SwarmController, SwarmConfig
     SWARM_AVAILABLE = True
@@ -101,25 +101,25 @@ class SimConfig:
     kill_radius: float = 150.0  # Intercept success radius (meters) - proximity fuse
     real_time: bool = True      # Try to match wall-clock time
 
-    # Environmental effects (Phase 6)
+    # Environmental effects
     environment: Optional[EnvironmentConfig] = None  # None = no environment effects
 
-    # Cooperative engagement (Phase 6)
+    # Cooperative engagement
     enable_cooperative: bool = False  # Enable cooperative engagement features
 
-    # Phase 7: Swarm control
+    # Swarm control
     enable_swarm: bool = False
     swarm_config: Optional['SwarmConfig'] = None
 
-    # Phase 7: Terrain
+    # Terrain
     enable_terrain: bool = False
     terrain_config: Optional['TerrainConfig'] = None
 
-    # Phase 7: Datalink
+    # Datalink
     enable_datalink: bool = False
     datalink_config: Optional['DatalinkConfig'] = None
 
-    # Phase 7: Human-Machine Teaming
+    # Human-Machine Teaming
     enable_hmt: bool = False
     hmt_config: Optional['HMTConfig'] = None
 
@@ -132,32 +132,32 @@ class SimState:
     tick: int
     status: SimStatus
     result: EngagementResult
-    targets: List[Entity]  # Support multiple targets (Phase 5)
+    targets: List[Entity]  # Support multiple targets
     interceptors: List[Entity]  # Support multiple interceptors
     miss_distance: float = float('inf')
     intercepting_id: Optional[str] = None  # Which interceptor hit (if any)
-    intercepted_target_id: Optional[str] = None  # Which target was hit (Phase 5)
+    intercepted_target_id: Optional[str] = None  # Which target was hit
     intercepted_pairs: List[tuple] = field(default_factory=list)  # All (interceptor_id, target_id) pairs that hit
 
-    # Phase 6: Environment state
-    environment: Optional['EnvironmentModel'] = None  # Reference to environment model
+    # Environment state
+    environment: Optional['EnvironmentModel'] = None
 
-    # Phase 6: Cooperative engagement state
+    # Cooperative engagement state
     cooperative: Optional['CooperativeEngagementManager'] = None
 
-    # Phase 7: Swarm controller
+    # Swarm controller
     swarm: Optional['SwarmController'] = None
 
-    # Phase 7: Terrain model
+    # Terrain model
     terrain: Optional['TerrainModel'] = None
 
-    # Phase 7: Datalink model
+    # Datalink model
     datalink: Optional['DatalinkModel'] = None
 
-    # Phase 7: Human-Machine Teaming
+    # Human-Machine Teaming
     hmt: Optional['HumanMachineTeaming'] = None
 
-    # Phase 8: Launch platforms (bogeys)
+    # Launch platforms (bogeys)
     launchers: List['LaunchPlatform'] = field(default_factory=list)
 
     # Legacy property for backward compatibility - single target
@@ -200,18 +200,18 @@ class SimState:
         if assignments:
             event["assignments"] = assignments.to_dict()
 
-        # Include environment state (Phase 6)
+        # Include environment state
         if self.environment:
             event["environment"] = {
                 "config": self.environment.config.to_dict(),
                 "current_wind": self.environment.state.current_wind.to_dict(),
             }
 
-        # Include cooperative state (Phase 6)
+        # Include cooperative state
         if self.cooperative:
             event["cooperative"] = self.cooperative.get_state().to_dict()
 
-        # Phase 7: Include swarm state
+        # Include swarm state
         if self.swarm:
             event["swarm"] = {
                 "leader_id": self.swarm.state.leader_id,
@@ -223,11 +223,11 @@ class SimState:
                 },
             }
 
-        # Phase 7: Include datalink state
+        # Include datalink state
         if self.datalink:
             event["datalink"] = self.datalink.get_stats().to_dict()
 
-        # Phase 7: Include HMT state
+        # Include HMT state
         if self.hmt:
             event["hmt"] = {
                 "authority_level": self.hmt.config.authority_level.value,
@@ -237,7 +237,7 @@ class SimState:
                 "trust": self.hmt.trust.to_dict(),
             }
 
-        # Phase 8: Include launcher state
+        # Include launcher state
         if self.launchers:
             event["launchers"] = [l.to_state_dict() for l in self.launchers]
 
@@ -318,42 +318,42 @@ class SimEngine:
         self._evasion_state = evasion_state
         self._evasion_config = evasion_cfg
 
-        # Phase 5: WTA setup
+        # WTA setup
         self.wta_algorithm = wta_algorithm
         self.assignments: Optional[AssignmentResult] = None
 
-        # Phase 6: Environment setup
+        # Environment setup
         env_cfg = environment_config or self.config.environment
         self.environment: Optional[EnvironmentModel] = (
             EnvironmentModel(env_cfg) if env_cfg else None
         )
 
-        # Phase 6: Cooperative engagement setup
+        # Cooperative engagement setup
         self.enable_cooperative = enable_cooperative or self.config.enable_cooperative
         self.cooperative: Optional[CooperativeEngagementManager] = (
             CooperativeEngagementManager() if self.enable_cooperative else None
         )
 
-        # Phase 7: Swarm controller setup
+        # Swarm controller setup
         self.swarm: Optional['SwarmController'] = None
         if self.config.enable_swarm and SWARM_AVAILABLE:
             swarm_cfg = self.config.swarm_config or SwarmConfig()
             self.swarm = SwarmController(swarm_cfg)
 
-        # Phase 7: Terrain model setup
+        # Terrain model setup
         self.terrain: Optional['TerrainModel'] = None
         if self.config.enable_terrain and TERRAIN_AVAILABLE:
             terrain_cfg = self.config.terrain_config or TerrainConfig()
             self.terrain = TerrainModel(terrain_cfg)
             self.terrain.generate_procedural()  # Auto-generate procedural terrain
 
-        # Phase 7: Datalink model setup
+        # Datalink model setup
         self.datalink: Optional['DatalinkModel'] = None
         if self.config.enable_datalink and DATALINK_AVAILABLE:
             datalink_cfg = self.config.datalink_config or DatalinkConfig()
             self.datalink = DatalinkModel(datalink_cfg)
 
-        # Phase 7: Human-Machine Teaming setup
+        # Human-Machine Teaming setup
         self.hmt: Optional['HumanMachineTeaming'] = None
         if self.config.enable_hmt and HMT_AVAILABLE:
             hmt_cfg = self.config.hmt_config or HMTConfig()
@@ -380,7 +380,7 @@ class SimEngine:
         run_id: Optional[str] = None,
         num_interceptors: int = 1,
         interceptor_spacing: float = 200.0,  # meters between interceptors
-        # Phase 5: Multi-target support
+        # Multi-target support
         additional_targets: Optional[List[Dict]] = None,  # [{start: Vec3, velocity: Vec3}, ...]
         num_targets: int = 1,  # Alternative: auto-generate multiple targets
         target_spacing: float = 300.0,  # meters between auto-generated targets
@@ -425,7 +425,7 @@ class SimEngine:
                 create_interceptor(start_pos, interceptor_velocity, f"I{i+1}")
             )
 
-        # Phase 5: Create targets (support multiple)
+        # Create targets (support multiple)
         targets = []
 
         # Primary target always created
@@ -472,7 +472,7 @@ class SimEngine:
             t.id: EvasionState() for t in targets
         }
 
-        # Phase 6: Reset cooperative manager if enabled
+        # Reset cooperative manager if enabled
         if self.cooperative:
             self.cooperative.reset()
 
@@ -484,12 +484,12 @@ class SimEngine:
             result=EngagementResult.PENDING,
             targets=targets,
             interceptors=interceptors,
-            environment=self.environment,  # Phase 6
-            cooperative=self.cooperative,  # Phase 6
-            swarm=self.swarm,              # Phase 7
-            terrain=self.terrain,          # Phase 7
-            datalink=self.datalink,        # Phase 7
-            hmt=self.hmt,                  # Phase 7
+            environment=self.environment,
+            cooperative=self.cooperative,
+            swarm=self.swarm,
+            terrain=self.terrain,
+            datalink=self.datalink,
+            hmt=self.hmt,
         )
 
         self._finalize_scenario_setup(targets, interceptors)
@@ -529,7 +529,7 @@ class SimEngine:
             t.id: EvasionState() for t in targets
         }
 
-        # Phase 6: Reset cooperative manager if enabled
+        # Reset cooperative manager if enabled
         if self.cooperative:
             self.cooperative.reset()
 
@@ -543,10 +543,10 @@ class SimEngine:
             interceptors=interceptors,
             environment=self.environment,
             cooperative=self.cooperative,
-            swarm=self.swarm,              # Phase 7
-            terrain=self.terrain,          # Phase 7
-            datalink=self.datalink,        # Phase 7
-            hmt=self.hmt,                  # Phase 7
+            swarm=self.swarm,
+            terrain=self.terrain,
+            datalink=self.datalink,
+            hmt=self.hmt,
         )
 
         self._finalize_scenario_setup(targets, interceptors)
@@ -557,16 +557,16 @@ class SimEngine:
         interceptors: List[Entity],
     ) -> None:
         """Common setup finalization for both standard and custom scenarios."""
-        # Phase 5: Compute initial WTA assignment (once at start)
+        # Compute initial WTA assignment (once at start)
         if len(targets) > 0 and len(interceptors) > 0:
             self.assignments = compute_assignment(
                 interceptors,
                 targets,
                 self.wta_algorithm,
-                cooperative_manager=self.cooperative,  # Phase 6: Pass cooperative manager
+                cooperative_manager=self.cooperative,
             )
 
-            # Phase 6: Initialize target assignments in cooperative manager
+            # Initialize target assignments in cooperative manager
             if self.cooperative and self.assignments:
                 for assignment in self.assignments.assignments:
                     self.cooperative.set_target_assignment(
@@ -579,7 +579,7 @@ class SimEngine:
     def _check_end_conditions(self) -> None:
         """Check if simulation should end.
 
-        Phase 5: Updated to handle multiple targets.
+        Updated to handle multiple targets.
         Intercept is achieved when ALL targets are hit (or all interceptors/targets are accounted for).
         """
         if self.state is None:
@@ -674,7 +674,7 @@ class SimEngine:
         This is the core loop that runs at 50 Hz:
         1. Apply target evasion maneuver (for each target)
         2. Apply guidance law to each interceptor (against assigned/nearest target)
-        3. Apply environmental forces (wind, drag) - Phase 6
+        3. Apply environmental forces (wind, drag)
         4. Update entity physics
         5. Check end conditions
         6. Emit state event
@@ -705,7 +705,7 @@ class SimEngine:
         # Track which interceptors are still active
         intercepted_interceptor_ids = set(pair[0] for pair in self.state.intercepted_pairs)
 
-        # Phase 7: Track approved engagements for HMT human-in-loop mode
+        # Track approved engagements for HMT human-in-loop mode
         # None = all engagements allowed (default when HMT disabled)
         approved_engagements = None
         if self.hmt:
@@ -732,7 +732,7 @@ class SimEngine:
                 interceptor.set_acceleration(Vec3.zero())
                 continue
 
-            # Phase 5: Use WTA assignment to get assigned target
+            # Use WTA assignment to get assigned target
             assigned_target = None
             assigned_target_id = None
             if self.assignments:
@@ -752,7 +752,7 @@ class SimEngine:
                 )
                 assigned_target_id = assigned_target.id
 
-            # Phase 7: HMT human-in-loop check
+            # HMT human-in-loop check
             # If in human-in-loop mode and engagement not approved, coast instead
             if approved_engagements is not None and (interceptor.id, assigned_target_id) not in approved_engagements:
                 # Not approved yet - coast (maintain velocity, no acceleration)
@@ -774,7 +774,7 @@ class SimEngine:
             accel_cmd = self.guidance(temp_state)
             interceptor.set_acceleration(accel_cmd)
 
-        # 3. ENVIRONMENT: Apply environmental forces (Phase 6)
+        # 3. ENVIRONMENT: Apply environmental forces
         if self.environment:
             self.environment.update(self.state.sim_time)
             for entity in self.state.targets + self.state.interceptors:
@@ -787,7 +787,7 @@ class SimEngine:
                 )
                 entity.acceleration = entity.acceleration + env_accel
 
-        # 4. COOPERATIVE: Check for zone-based handoffs (Phase 6)
+        # 4. COOPERATIVE: Check for zone-based handoffs
         if self.cooperative:
             self.cooperative.update(self.state.sim_time)
 
@@ -822,7 +822,7 @@ class SimEngine:
                                 current_time=self.state.sim_time
                             )
 
-        # 5. SWARM: Apply swarm steering to interceptors (Phase 7)
+        # 5. SWARM: Apply swarm steering to interceptors
         if self.swarm:
             active_interceptors = [
                 i for i in self.state.interceptors
@@ -834,7 +834,7 @@ class SimEngine:
                 swarm_accel = self.swarm.compute_steering(interceptor, active_interceptors)
                 interceptor.acceleration = interceptor.acceleration + swarm_accel
 
-        # 6. DATALINK: Update communication model (Phase 7)
+        # 6. DATALINK: Update communication model
         if self.datalink:
             # Update entity positions in datalink
             for entity in self.state.targets + self.state.interceptors:
@@ -844,7 +844,7 @@ class SimEngine:
             delivered = self.datalink.update(self.state.sim_time)
             # Messages could be processed here for networked fire control
 
-        # 7. HMT: Update human-machine teaming (Phase 7)
+        # 7. HMT: Update human-machine teaming
         if self.hmt:
             timed_out = self.hmt.update(self.state.sim_time)
             # Handle timed out actions if needed
@@ -1123,7 +1123,7 @@ SCENARIOS = {
         "interceptor_velocity": Vec3(200, 0, 10),
         "evasion": EvasionType.RANDOM_JINK,
     },
-    # Phase 5: Multi-target scenarios
+    # Multi-target scenarios
     "multi_target_2": {
         "description": "Two targets, head-on approach",
         "target_start": Vec3(3000, 0, 800),
@@ -1164,7 +1164,7 @@ SCENARIOS = {
         "num_targets": 4,
         "target_spacing": 300.0,
     },
-    # Phase 7: Swarm scenarios
+    # Swarm scenarios
     "swarm_v_formation": {
         "description": "4 interceptors in V-formation vs 2 targets",
         "target_start": Vec3(4000, 0, 800),

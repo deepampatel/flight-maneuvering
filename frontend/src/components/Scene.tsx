@@ -49,7 +49,7 @@ const INTERCEPTOR_EMISSIVE = [
   '#0f766e',
 ];
 
-// Phase 5: Color palette for multiple targets (shades of red/orange)
+// Color palette for multiple targets (shades of red/orange)
 const TARGET_COLORS = [
   '#ef4444', // Red
   '#f97316', // Orange
@@ -970,13 +970,13 @@ interface SceneContentProps {
   interceptGeometry?: InterceptGeometry[] | null;
   assignments?: AssignmentResult | null;
   currentWind?: Vec3 | null;
-  sensorTracks?: SensorTrack[] | null;  // Phase 6: Track uncertainty visualization
-  cooperativeState?: CooperativeState | null;  // Phase 6: Cooperative engagement
+  sensorTracks?: SensorTrack[] | null;  // Track uncertainty visualization
+  cooperativeState?: CooperativeState | null;  // Cooperative engagement
   launchers?: LauncherState[] | null;  // Launch platforms
 }
 
 function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers }: SceneContentProps) {
-  // Phase 5: Support multiple targets
+  // Support multiple targets
   const targets = state?.entities.filter((e) => e.type === 'target') || [];
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
@@ -1107,7 +1107,7 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         // Skip intercepted targets
         if (interceptedTargetIds.has(geom.target_id)) return null;
 
-        // Phase 5: Only show geometry for assigned target (not all targets)
+        // Only show geometry for assigned target (not all targets)
         const assignedTargetId = assignmentMap.get(geom.interceptor_id);
         if (assignedTargetId && geom.target_id !== assignedTargetId) return null;
 
@@ -1159,8 +1159,8 @@ interface SimulationSceneProps {
   state: SimStateEvent | SimStateEventWithEnvironment | null;
   interceptGeometry?: InterceptGeometry[] | null;
   assignments?: AssignmentResult | null;
-  sensorTracks?: SensorTrack[] | null;  // Phase 6
-  cooperativeState?: CooperativeState | null;  // Phase 6: Cooperative engagement
+  sensorTracks?: SensorTrack[] | null;  //
+  cooperativeState?: CooperativeState | null;  // Cooperative engagement
   launchers?: LauncherState[] | null;  // Launch platforms
   // Mission Planner props
   plannerMode?: PlacementMode;

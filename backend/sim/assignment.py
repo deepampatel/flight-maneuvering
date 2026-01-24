@@ -161,7 +161,7 @@ def compute_assignment_cost(
         weights.get("threat", 0.3) * threat_cost
     )
 
-    # Phase 6: Apply zone cost modifier if cooperative manager is provided
+    # Apply zone cost modifier if cooperative manager is provided
     if cooperative_manager:
         zone_modifier = cooperative_manager.get_zone_cost_modifier(
             interceptor.id,
