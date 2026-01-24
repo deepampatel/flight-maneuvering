@@ -246,6 +246,14 @@ export interface SimStateEvent {
   intercepted_target_id?: string;
   intercepted_pairs?: [string, string][];
   assignments?: AssignmentResult;  // WTA assignments included in state
+  // Phase 7: HMT state from WebSocket
+  hmt?: {
+    authority_level: string;
+    pending_count: number;
+    pending_actions: PendingAction[];
+    workload: WorkloadMetrics;
+    trust: TrustMetrics;
+  };
 }
 
 // Phase 5: Sensor Types
@@ -524,4 +532,228 @@ export interface MLFeaturesResponse {
   target_id: string;
   threat_features: MLFeatures;
   guidance_features: MLFeatures;
+}
+
+// =============================================================================
+// Phase 7: Swarm Types
+// =============================================================================
+
+export type FormationType =
+  | 'line_abreast'
+  | 'echelon_right'
+  | 'echelon_left'
+  | 'v_formation'
+  | 'wedge'
+  | 'trail'
+  | 'diamond'
+  | 'swarm';
+
+export interface SwarmConfig {
+  formation: FormationType;
+  spacing: number;
+  formation_stiffness: number;
+  separation_weight: number;
+  alignment_weight: number;
+  cohesion_weight: number;
+  leader_follow_weight: number;
+  enable_collision_avoidance: boolean;
+  collision_radius: number;
+  max_steering_accel: number;
+}
+
+export interface SwarmState {
+  leader_id: string | null;
+  formation_error: number;
+  cohesion_metric: number;
+  formation: FormationType;
+  slot_positions: Record<string, Vec3>;
+}
+
+export interface SwarmStatus {
+  available: boolean;
+  enabled: boolean;
+  config: SwarmConfig | null;
+  state: SwarmState | null;
+}
+
+export interface FormationInfo {
+  id: FormationType;
+  name: string;
+  description: string;
+}
+
+// =============================================================================
+// Phase 7: Terrain Types
+// =============================================================================
+
+export interface TerrainConfig {
+  dem_file: string | null;
+  resolution: number;
+  bounds: [number, number, number, number];
+  enable_masking: boolean;
+  enable_radar_horizon: boolean;
+  procedural_seed: number;
+  procedural_amplitude: number;
+}
+
+export interface TerrainStatus {
+  available: boolean;
+  enabled: boolean;
+  loaded: boolean;
+  config: TerrainConfig | null;
+}
+
+export interface HeightmapData {
+  width: number;
+  height: number;
+  data: number[];
+  bounds: [number, number, number, number];
+  min_elevation: number;
+  max_elevation: number;
+  resolution: number;
+}
+
+// =============================================================================
+// Phase 7: Datalink Types
+// =============================================================================
+
+export interface DatalinkConfig {
+  bandwidth_kbps: number;
+  bandwidth_window_ms: number;
+  base_latency_ms: number;
+  latency_jitter_ms: number;
+  distance_latency_factor: number;
+  packet_loss_rate: number;
+  max_range_km: number;
+  enable_jamming: boolean;
+  jam_effectiveness: number;
+  max_queue_size: number;
+  priority_queue: boolean;
+}
+
+export interface DatalinkStats {
+  messages_sent: number;
+  messages_delivered: number;
+  messages_dropped: number;
+  messages_expired: number;
+  bytes_sent: number;
+  bytes_delivered: number;
+  average_latency_ms: number;
+  bandwidth_utilization: number;
+  current_queue_size: number;
+}
+
+export interface DatalinkStatus {
+  available: boolean;
+  enabled: boolean;
+  config: DatalinkConfig | null;
+  stats: DatalinkStats | null;
+}
+
+export interface Jammer {
+  jammer_id: string;
+  position: Vec3;
+  power: number;
+  radius: number;
+  active: boolean;
+}
+
+// =============================================================================
+// Phase 7: Human-Machine Teaming Types
+// =============================================================================
+
+export type AuthorityLevel = 'full_auto' | 'human_on_loop' | 'human_in_loop' | 'manual';
+
+export type ActionType =
+  | 'engage'
+  | 'maneuver'
+  | 'handoff'
+  | 'abort'
+  | 'weapons_release'
+  | 'mode_change'
+  | 'formation_change';
+
+export type ActionStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved';
+
+export interface PendingAction {
+  action_id: string;
+  action_type: ActionType;
+  entity_id: string;
+  target_id: string | null;
+  proposed_by: string;
+  confidence: number;
+  details: Record<string, unknown>;
+  timestamp: number;
+  timeout: number;
+  status: ActionStatus;
+  decision_time: number | null;
+  decision_reason: string | null;
+  time_remaining: number;
+}
+
+export interface HMTConfig {
+  authority_level: AuthorityLevel;
+  approval_timeout: number;
+  require_approval_types: ActionType[];
+  confidence_threshold: number;
+  auto_approve_on_timeout: boolean;
+  max_concurrent_decisions: number;
+  decision_fatigue_threshold: number;
+}
+
+export interface WorkloadMetrics {
+  actions_per_minute: number;
+  pending_actions: number;
+  response_time_avg_ms: number;
+  missed_deadlines: number;
+  total_decisions: number;
+  fatigue_level: number;
+}
+
+export interface TrustMetrics {
+  ai_accuracy: number;
+  human_override_rate: number;
+  automation_reliance: number;
+  agreement_rate: number;
+}
+
+export interface HMTStatus {
+  available: boolean;
+  enabled: boolean;
+  config: HMTConfig | null;
+  metrics: {
+    workload: WorkloadMetrics;
+    trust: TrustMetrics;
+    authority_level: AuthorityLevel;
+    pending_count: number;
+  } | null;
+}
+
+export interface AuthorityLevelInfo {
+  id: AuthorityLevel;
+  name: string;
+  description: string;
+}
+
+// =============================================================================
+// Phase 7: Combined Status
+// =============================================================================
+
+export interface Phase7Status {
+  swarm: {
+    available: boolean;
+    enabled: boolean;
+  };
+  terrain: {
+    available: boolean;
+    enabled: boolean;
+  };
+  datalink: {
+    available: boolean;
+    enabled: boolean;
+  };
+  hmt: {
+    available: boolean;
+    enabled: boolean;
+  };
 }

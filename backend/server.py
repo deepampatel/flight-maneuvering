@@ -166,6 +166,17 @@ class RunConfig(BaseModel):
     # Mission Planner: Custom entities
     custom_entities: Optional[list[PlannedEntityModel]] = None
     custom_zones: Optional[list[PlannedZoneModel]] = None
+    # Phase 7: Swarm
+    enable_swarm: bool = False
+    swarm_formation: Optional[str] = None
+    swarm_spacing: Optional[float] = None
+    # Phase 7: HMT
+    enable_hmt: bool = False
+    hmt_authority_level: Optional[str] = None
+    # Phase 7: Datalink
+    enable_datalink: bool = False
+    # Phase 7: Terrain
+    enable_terrain: bool = False
 
 
 class MonteCarloRequest(BaseModel):
@@ -429,6 +440,16 @@ async def start_run(config: RunConfig):
             enable_drag=config.enable_drag,
         )
 
+    # Phase 7: Check if scenario has swarm settings (auto-enable)
+    scenario_enable_swarm = scenario.get("enable_swarm", False)
+    scenario_swarm_formation = scenario.get("swarm_formation")
+    scenario_swarm_spacing = scenario.get("swarm_spacing")
+
+    # Use scenario swarm settings if present, otherwise use config
+    effective_enable_swarm = config.enable_swarm or scenario_enable_swarm
+    effective_swarm_formation = config.swarm_formation or scenario_swarm_formation
+    effective_swarm_spacing = config.swarm_spacing or scenario_swarm_spacing
+
     # Create engine with config
     sim_config = SimConfig(
         dt=config.dt,
@@ -436,6 +457,11 @@ async def start_run(config: RunConfig):
         kill_radius=config.kill_radius,
         real_time=config.real_time,
         enable_cooperative=config.enable_cooperative,
+        # Phase 7
+        enable_swarm=effective_enable_swarm,
+        enable_terrain=config.enable_terrain,
+        enable_datalink=config.enable_datalink,
+        enable_hmt=config.enable_hmt,
     )
     current_engine = SimEngine(
         config=sim_config,
@@ -445,6 +471,23 @@ async def start_run(config: RunConfig):
         environment_config=environment_config,
         enable_cooperative=config.enable_cooperative,
     )
+
+    # Phase 7: Configure swarm if enabled
+    if effective_enable_swarm and current_engine.swarm:
+        if effective_swarm_formation:
+            current_engine.swarm.set_formation(effective_swarm_formation)
+        if effective_swarm_spacing:
+            current_engine.swarm.config.spacing = effective_swarm_spacing
+
+    # Phase 7: Configure HMT if enabled
+    if config.enable_hmt and current_engine.hmt:
+        if config.hmt_authority_level:
+            from sim.hmt import AuthorityLevel
+            try:
+                level = AuthorityLevel(config.hmt_authority_level)
+                current_engine.hmt.set_authority_level(level)
+            except ValueError:
+                pass  # Invalid level, use default
 
     # Register broadcast handler
     current_engine.on_event(manager.broadcast)
@@ -467,17 +510,23 @@ async def start_run(config: RunConfig):
         current_engine.setup_custom_scenario(config.custom_entities)
     else:
         # Setup scenario with multi-target support (Phase 5)
-        num_targets = config.num_targets if config.num_targets else scenario.get("num_targets", 1)
+        # Use config value if explicitly set, otherwise use scenario default
+        num_targets = config.num_targets if config.num_targets is not None else scenario.get("num_targets", 1)
         target_spacing = scenario.get("target_spacing", 300.0)
+        # Phase 7: Swarm scenarios can specify num_interceptors
+        # Scenario num_interceptors takes precedence (for swarm scenarios)
+        num_interceptors = scenario.get("num_interceptors") or config.num_interceptors
+        interceptor_spacing = scenario.get("interceptor_spacing", 100.0)
 
         current_engine.setup_scenario(
             target_start=scenario["target_start"],
             target_velocity=scenario["target_velocity"],
             interceptor_start=scenario["interceptor_start"],
             interceptor_velocity=scenario["interceptor_velocity"],
-            num_interceptors=config.num_interceptors,
+            num_interceptors=num_interceptors,
             num_targets=num_targets,
             target_spacing=target_spacing,
+            interceptor_spacing=interceptor_spacing,
         )
 
     # Create custom zones if provided
@@ -497,8 +546,8 @@ async def start_run(config: RunConfig):
         "run_id": current_engine.state.run_id,
         "scenario": config.scenario if not config.custom_entities else "custom",
         "status": "started",
-        "num_interceptors": len([e for e in (config.custom_entities or []) if e.type == "interceptor"]) or config.num_interceptors,
-        "num_targets": len([e for e in (config.custom_entities or []) if e.type == "target"]) or (config.num_targets or 1),
+        "num_interceptors": len(current_engine.state.interceptors),
+        "num_targets": len(current_engine.state.targets),
     }
 
 
@@ -1810,6 +1859,416 @@ async def get_ml_features(interceptor_id: str, target_id: str):
             "values": guidance_features.to_numpy().tolist(),
             "names": GuidanceFeatures.feature_names(),
         }
+    }
+
+
+# ============================================================
+# Phase 7: Swarm Endpoints
+# ============================================================
+
+# Import Phase 7 modules
+try:
+    from sim.swarm import SwarmConfig, FormationType, get_available_formations
+    SWARM_AVAILABLE = True
+except ImportError:
+    SWARM_AVAILABLE = False
+
+try:
+    from sim.terrain import TerrainModel, TerrainConfig
+    TERRAIN_AVAILABLE = True
+except ImportError:
+    TERRAIN_AVAILABLE = False
+
+try:
+    from sim.datalink import DatalinkModel, DatalinkConfig, Message, MessageType, MessagePriority
+    DATALINK_AVAILABLE = True
+except ImportError:
+    DATALINK_AVAILABLE = False
+
+try:
+    from sim.hmt import HumanMachineTeaming, HMTConfig, PendingAction, ActionType, AuthorityLevel, get_authority_levels
+    HMT_AVAILABLE = True
+except ImportError:
+    HMT_AVAILABLE = False
+
+
+class SwarmConfigRequest(BaseModel):
+    """Request body for swarm configuration."""
+    formation: str = "line_abreast"
+    spacing: float = 200.0
+    separation_weight: float = 1.5
+    alignment_weight: float = 1.0
+    cohesion_weight: float = 1.0
+    leader_follow_weight: float = 2.0
+    enable_collision_avoidance: bool = True
+
+
+@app.get("/swarm/status")
+async def get_swarm_status():
+    """Get swarm subsystem status."""
+    if not SWARM_AVAILABLE:
+        return {"available": False, "message": "Swarm module not available"}
+
+    swarm = current_engine.swarm if current_engine else None
+
+    return {
+        "available": True,
+        "enabled": swarm is not None,
+        "config": swarm.config.to_dict() if swarm else None,
+        "state": {
+            "leader_id": swarm.state.leader_id if swarm else None,
+            "formation_error": swarm.state.formation_error if swarm else 0.0,
+            "cohesion_metric": swarm.state.cohesion_metric if swarm else 0.0,
+        } if swarm else None,
+    }
+
+
+@app.get("/swarm/formations")
+async def get_swarm_formations():
+    """List available swarm formations."""
+    if not SWARM_AVAILABLE:
+        return {"formations": []}
+    return {"formations": get_available_formations()}
+
+
+@app.post("/swarm/configure")
+async def configure_swarm(request: SwarmConfigRequest):
+    """Configure swarm behavior."""
+    if not SWARM_AVAILABLE:
+        raise HTTPException(status_code=400, detail="Swarm module not available")
+
+    if current_engine is None:
+        raise HTTPException(status_code=400, detail="No active simulation")
+
+    if current_engine.swarm is None:
+        raise HTTPException(status_code=400, detail="Swarm not enabled for this run")
+
+    # Update config
+    current_engine.swarm.config.formation = FormationType(request.formation)
+    current_engine.swarm.config.spacing = request.spacing
+    current_engine.swarm.config.separation_weight = request.separation_weight
+    current_engine.swarm.config.alignment_weight = request.alignment_weight
+    current_engine.swarm.config.cohesion_weight = request.cohesion_weight
+    current_engine.swarm.config.leader_follow_weight = request.leader_follow_weight
+    current_engine.swarm.config.enable_collision_avoidance = request.enable_collision_avoidance
+
+    return {"status": "configured", "config": current_engine.swarm.config.to_dict()}
+
+
+@app.post("/swarm/set-leader/{leader_id}")
+async def set_swarm_leader(leader_id: str):
+    """Set the swarm leader."""
+    if current_engine is None or current_engine.swarm is None:
+        raise HTTPException(status_code=400, detail="Swarm not enabled")
+
+    current_engine.swarm.set_leader(leader_id)
+    return {"status": "leader_set", "leader_id": leader_id}
+
+
+# ============================================================
+# Phase 7: Terrain Endpoints
+# ============================================================
+
+@app.get("/terrain/status")
+async def get_terrain_status():
+    """Get terrain subsystem status."""
+    if not TERRAIN_AVAILABLE:
+        return {"available": False, "message": "Terrain module not available"}
+
+    terrain = current_engine.terrain if current_engine else None
+
+    return {
+        "available": True,
+        "enabled": terrain is not None,
+        "loaded": terrain.is_loaded if terrain else False,
+        "config": terrain.config.to_dict() if terrain else None,
+    }
+
+
+@app.get("/terrain/elevation")
+async def get_terrain_elevation(x: float, y: float):
+    """Get terrain elevation at a point."""
+    if current_engine is None or current_engine.terrain is None:
+        return {"elevation": 0.0, "enabled": False}
+
+    elevation = current_engine.terrain.get_elevation(x, y)
+    return {"elevation": elevation, "x": x, "y": y}
+
+
+@app.get("/terrain/los")
+async def check_terrain_los(
+    x1: float, y1: float, z1: float,
+    x2: float, y2: float, z2: float
+):
+    """Check line-of-sight between two points."""
+    if current_engine is None or current_engine.terrain is None:
+        return {"clear": True, "enabled": False}
+
+    pos1 = Vec3(x1, y1, z1)
+    pos2 = Vec3(x2, y2, z2)
+
+    clear = current_engine.terrain.is_line_of_sight_clear(pos1, pos2)
+    return {"clear": clear, "pos1": pos1.to_dict(), "pos2": pos2.to_dict()}
+
+
+@app.get("/terrain/heightmap")
+async def get_terrain_heightmap(max_resolution: int = 100):
+    """Get terrain heightmap data for visualization."""
+    if current_engine is None or current_engine.terrain is None:
+        return {"width": 0, "height": 0, "data": [], "enabled": False}
+
+    return current_engine.terrain.get_heightmap_data(max_resolution=max_resolution)
+
+
+@app.post("/terrain/generate")
+async def generate_terrain(seed: int = 42, amplitude: float = 500.0):
+    """Generate procedural terrain."""
+    if current_engine is None or current_engine.terrain is None:
+        raise HTTPException(status_code=400, detail="Terrain not enabled")
+
+    current_engine.terrain.config.procedural_seed = seed
+    current_engine.terrain.config.procedural_amplitude = amplitude
+    current_engine.terrain.generate_procedural(seed)
+
+    return {"status": "generated", "seed": seed, "amplitude": amplitude}
+
+
+# ============================================================
+# Phase 7: Datalink Endpoints
+# ============================================================
+
+class DatalinkConfigRequest(BaseModel):
+    """Request body for datalink configuration."""
+    bandwidth_kbps: float = 100.0
+    base_latency_ms: float = 50.0
+    latency_jitter_ms: float = 10.0
+    packet_loss_rate: float = 0.01
+    max_range_km: float = 50.0
+    enable_jamming: bool = False
+
+
+@app.get("/datalink/status")
+async def get_datalink_status():
+    """Get datalink subsystem status."""
+    if not DATALINK_AVAILABLE:
+        return {"available": False, "message": "Datalink module not available"}
+
+    datalink = current_engine.datalink if current_engine else None
+
+    return {
+        "available": True,
+        "enabled": datalink is not None,
+        "config": datalink.config.to_dict() if datalink else None,
+        "stats": datalink.get_stats().to_dict() if datalink else None,
+    }
+
+
+@app.post("/datalink/configure")
+async def configure_datalink(request: DatalinkConfigRequest):
+    """Configure datalink parameters."""
+    if current_engine is None or current_engine.datalink is None:
+        raise HTTPException(status_code=400, detail="Datalink not enabled")
+
+    datalink = current_engine.datalink
+    datalink.config.bandwidth_kbps = request.bandwidth_kbps
+    datalink.config.base_latency_ms = request.base_latency_ms
+    datalink.config.latency_jitter_ms = request.latency_jitter_ms
+    datalink.config.packet_loss_rate = request.packet_loss_rate
+    datalink.config.max_range_km = request.max_range_km
+    datalink.config.enable_jamming = request.enable_jamming
+
+    return {"status": "configured", "config": datalink.config.to_dict()}
+
+
+@app.get("/datalink/link-quality/{entity1_id}/{entity2_id}")
+async def get_link_quality(entity1_id: str, entity2_id: str):
+    """Get link quality between two entities."""
+    if current_engine is None or current_engine.datalink is None:
+        return {"quality": 1.0, "enabled": False}
+
+    quality = current_engine.datalink.get_link_quality(entity1_id, entity2_id)
+    return {"quality": quality, "entity1": entity1_id, "entity2": entity2_id}
+
+
+class JammerRequest(BaseModel):
+    """Request body for adding a jammer."""
+    jammer_id: str
+    x: float
+    y: float
+    z: float
+    power: float = 0.5
+    radius: float = 2000.0
+
+
+@app.post("/datalink/jammers")
+async def add_jammer(request: JammerRequest):
+    """Add a jamming source."""
+    if current_engine is None or current_engine.datalink is None:
+        raise HTTPException(status_code=400, detail="Datalink not enabled")
+
+    from sim.datalink import Jammer
+
+    jammer = Jammer(
+        jammer_id=request.jammer_id,
+        position=Vec3(request.x, request.y, request.z),
+        power=request.power,
+        radius=request.radius,
+    )
+    current_engine.datalink.add_jammer(jammer)
+
+    return {"status": "added", "jammer": jammer.to_dict()}
+
+
+@app.delete("/datalink/jammers/{jammer_id}")
+async def remove_jammer(jammer_id: str):
+    """Remove a jamming source."""
+    if current_engine is None or current_engine.datalink is None:
+        raise HTTPException(status_code=400, detail="Datalink not enabled")
+
+    current_engine.datalink.remove_jammer(jammer_id)
+    return {"status": "removed", "jammer_id": jammer_id}
+
+
+# ============================================================
+# Phase 7: Human-Machine Teaming Endpoints
+# ============================================================
+
+class HMTConfigRequest(BaseModel):
+    """Request body for HMT configuration."""
+    authority_level: str = "human_on_loop"
+    approval_timeout: float = 5.0
+    confidence_threshold: float = 0.8
+    auto_approve_on_timeout: bool = True
+
+
+@app.get("/hmt/status")
+async def get_hmt_status():
+    """Get HMT subsystem status."""
+    if not HMT_AVAILABLE:
+        return {"available": False, "message": "HMT module not available"}
+
+    hmt = current_engine.hmt if current_engine else None
+
+    return {
+        "available": True,
+        "enabled": hmt is not None,
+        "config": hmt.config.to_dict() if hmt else None,
+        "metrics": hmt.get_metrics() if hmt else None,
+    }
+
+
+@app.get("/hmt/authority-levels")
+async def get_hmt_authority_levels():
+    """List available authority levels."""
+    if not HMT_AVAILABLE:
+        return {"levels": []}
+    return {"levels": get_authority_levels()}
+
+
+class SetAuthorityRequest(BaseModel):
+    """Request body for setting authority level."""
+    authority_level: str
+
+
+@app.post("/hmt/authority")
+async def set_hmt_authority(request: SetAuthorityRequest):
+    """Set the HMT authority level."""
+    if current_engine is None or current_engine.hmt is None:
+        raise HTTPException(status_code=400, detail="HMT not enabled")
+
+    try:
+        level = AuthorityLevel(request.authority_level)
+        current_engine.hmt.set_authority_level(level)
+        return {"status": "ok", "authority_level": level.value}
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid authority level: {request.authority_level}")
+
+
+@app.post("/hmt/configure")
+async def configure_hmt(request: HMTConfigRequest):
+    """Configure HMT parameters."""
+    if current_engine is None or current_engine.hmt is None:
+        raise HTTPException(status_code=400, detail="HMT not enabled")
+
+    hmt = current_engine.hmt
+    hmt.config.authority_level = AuthorityLevel(request.authority_level)
+    hmt.config.approval_timeout = request.approval_timeout
+    hmt.config.confidence_threshold = request.confidence_threshold
+    hmt.config.auto_approve_on_timeout = request.auto_approve_on_timeout
+
+    return {"status": "configured", "config": hmt.config.to_dict()}
+
+
+@app.get("/hmt/pending")
+async def get_hmt_pending_actions():
+    """Get pending actions awaiting approval."""
+    if current_engine is None or current_engine.hmt is None:
+        return {"pending": [], "enabled": False}
+
+    pending = current_engine.hmt.get_pending_actions()
+    return {"pending": [a.to_dict() for a in pending]}
+
+
+@app.post("/hmt/approve/{action_id}")
+async def approve_hmt_action(action_id: str, reason: Optional[str] = None):
+    """Approve a pending action."""
+    if current_engine is None or current_engine.hmt is None:
+        raise HTTPException(status_code=400, detail="HMT not enabled")
+
+    success = current_engine.hmt.approve_action(action_id, reason)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+    return {"status": "approved", "action_id": action_id}
+
+
+@app.post("/hmt/reject/{action_id}")
+async def reject_hmt_action(action_id: str, reason: Optional[str] = None):
+    """Reject a pending action."""
+    if current_engine is None or current_engine.hmt is None:
+        raise HTTPException(status_code=400, detail="HMT not enabled")
+
+    success = current_engine.hmt.reject_action(action_id, reason)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+    return {"status": "rejected", "action_id": action_id}
+
+
+@app.get("/hmt/history")
+async def get_hmt_action_history(limit: int = 20):
+    """Get recent action history."""
+    if current_engine is None or current_engine.hmt is None:
+        return {"history": [], "enabled": False}
+
+    history = current_engine.hmt.get_action_history(limit)
+    return {"history": [a.to_dict() for a in history]}
+
+
+# ============================================================
+# Phase 7: Combined Status Endpoint
+# ============================================================
+
+@app.get("/phase7/status")
+async def get_phase7_status():
+    """Get status of all Phase 7 subsystems."""
+    return {
+        "swarm": {
+            "available": SWARM_AVAILABLE,
+            "enabled": current_engine.swarm is not None if current_engine else False,
+        },
+        "terrain": {
+            "available": TERRAIN_AVAILABLE,
+            "enabled": current_engine.terrain is not None if current_engine else False,
+        },
+        "datalink": {
+            "available": DATALINK_AVAILABLE,
+            "enabled": current_engine.datalink is not None if current_engine else False,
+        },
+        "hmt": {
+            "available": HMT_AVAILABLE,
+            "enabled": current_engine.hmt is not None if current_engine else False,
+        },
     }
 
 

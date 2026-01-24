@@ -37,6 +37,39 @@ from .assignment import (
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
 
+# Phase 7 imports (optional - features disabled by default)
+try:
+    from .swarm import SwarmController, SwarmConfig
+    SWARM_AVAILABLE = True
+except ImportError:
+    SWARM_AVAILABLE = False
+    SwarmController = None
+    SwarmConfig = None
+
+try:
+    from .terrain import TerrainModel, TerrainConfig
+    TERRAIN_AVAILABLE = True
+except ImportError:
+    TERRAIN_AVAILABLE = False
+    TerrainModel = None
+    TerrainConfig = None
+
+try:
+    from .datalink import DatalinkModel, DatalinkConfig
+    DATALINK_AVAILABLE = True
+except ImportError:
+    DATALINK_AVAILABLE = False
+    DatalinkModel = None
+    DatalinkConfig = None
+
+try:
+    from .hmt import HumanMachineTeaming, HMTConfig, PendingAction, ActionType
+    HMT_AVAILABLE = True
+except ImportError:
+    HMT_AVAILABLE = False
+    HumanMachineTeaming = None
+    HMTConfig = None
+
 
 class SimStatus(str, Enum):
     READY = "ready"
@@ -66,6 +99,22 @@ class SimConfig:
     # Cooperative engagement (Phase 6)
     enable_cooperative: bool = False  # Enable cooperative engagement features
 
+    # Phase 7: Swarm control
+    enable_swarm: bool = False
+    swarm_config: Optional['SwarmConfig'] = None
+
+    # Phase 7: Terrain
+    enable_terrain: bool = False
+    terrain_config: Optional['TerrainConfig'] = None
+
+    # Phase 7: Datalink
+    enable_datalink: bool = False
+    datalink_config: Optional['DatalinkConfig'] = None
+
+    # Phase 7: Human-Machine Teaming
+    enable_hmt: bool = False
+    hmt_config: Optional['HMTConfig'] = None
+
 
 @dataclass
 class SimState:
@@ -87,6 +136,18 @@ class SimState:
 
     # Phase 6: Cooperative engagement state
     cooperative: Optional['CooperativeEngagementManager'] = None
+
+    # Phase 7: Swarm controller
+    swarm: Optional['SwarmController'] = None
+
+    # Phase 7: Terrain model
+    terrain: Optional['TerrainModel'] = None
+
+    # Phase 7: Datalink model
+    datalink: Optional['DatalinkModel'] = None
+
+    # Phase 7: Human-Machine Teaming
+    hmt: Optional['HumanMachineTeaming'] = None
 
     # Legacy property for backward compatibility - single target
     @property
@@ -135,6 +196,32 @@ class SimState:
         # Include cooperative state (Phase 6)
         if self.cooperative:
             event["cooperative"] = self.cooperative.get_state().to_dict()
+
+        # Phase 7: Include swarm state
+        if self.swarm:
+            event["swarm"] = {
+                "leader_id": self.swarm.state.leader_id,
+                "formation_error": self.swarm.state.formation_error,
+                "cohesion_metric": self.swarm.state.cohesion_metric,
+                "formation": self.swarm.config.formation.value,
+                "slot_positions": {
+                    str(k): v.to_dict() for k, v in self.swarm.state.slot_positions.items()
+                },
+            }
+
+        # Phase 7: Include datalink state
+        if self.datalink:
+            event["datalink"] = self.datalink.get_stats().to_dict()
+
+        # Phase 7: Include HMT state
+        if self.hmt:
+            event["hmt"] = {
+                "authority_level": self.hmt.config.authority_level.value,
+                "pending_count": len(self.hmt.pending_actions),
+                "pending_actions": [a.to_dict() for a in self.hmt.get_pending_actions()],
+                "workload": self.hmt.workload.to_dict(),
+                "trust": self.hmt.trust.to_dict(),
+            }
 
         return event
 
@@ -228,6 +315,31 @@ class SimEngine:
         self.cooperative: Optional[CooperativeEngagementManager] = (
             CooperativeEngagementManager() if self.enable_cooperative else None
         )
+
+        # Phase 7: Swarm controller setup
+        self.swarm: Optional['SwarmController'] = None
+        if self.config.enable_swarm and SWARM_AVAILABLE:
+            swarm_cfg = self.config.swarm_config or SwarmConfig()
+            self.swarm = SwarmController(swarm_cfg)
+
+        # Phase 7: Terrain model setup
+        self.terrain: Optional['TerrainModel'] = None
+        if self.config.enable_terrain and TERRAIN_AVAILABLE:
+            terrain_cfg = self.config.terrain_config or TerrainConfig()
+            self.terrain = TerrainModel(terrain_cfg)
+            self.terrain.generate_procedural()  # Auto-generate procedural terrain
+
+        # Phase 7: Datalink model setup
+        self.datalink: Optional['DatalinkModel'] = None
+        if self.config.enable_datalink and DATALINK_AVAILABLE:
+            datalink_cfg = self.config.datalink_config or DatalinkConfig()
+            self.datalink = DatalinkModel(datalink_cfg)
+
+        # Phase 7: Human-Machine Teaming setup
+        self.hmt: Optional['HumanMachineTeaming'] = None
+        if self.config.enable_hmt and HMT_AVAILABLE:
+            hmt_cfg = self.config.hmt_config or HMTConfig()
+            self.hmt = HumanMachineTeaming(hmt_cfg)
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -356,6 +468,10 @@ class SimEngine:
             interceptors=interceptors,
             environment=self.environment,  # Phase 6
             cooperative=self.cooperative,  # Phase 6
+            swarm=self.swarm,              # Phase 7
+            terrain=self.terrain,          # Phase 7
+            datalink=self.datalink,        # Phase 7
+            hmt=self.hmt,                  # Phase 7
         )
 
         self._finalize_scenario_setup(targets, interceptors)
@@ -409,6 +525,10 @@ class SimEngine:
             interceptors=interceptors,
             environment=self.environment,
             cooperative=self.cooperative,
+            swarm=self.swarm,              # Phase 7
+            terrain=self.terrain,          # Phase 7
+            datalink=self.datalink,        # Phase 7
+            hmt=self.hmt,                  # Phase 7
         )
 
         self._finalize_scenario_setup(targets, interceptors)
@@ -561,6 +681,20 @@ class SimEngine:
         # Track which interceptors are still active
         intercepted_interceptor_ids = set(pair[0] for pair in self.state.intercepted_pairs)
 
+        # Phase 7: Track approved engagements for HMT human-in-loop mode
+        approved_engagements: set = set()  # Set of (interceptor_id, target_id)
+        if self.hmt:
+            from .hmt import AuthorityLevel, ActionType, ActionStatus
+            # In human-in-loop mode, only allow approved engagements
+            if self.hmt.config.authority_level == AuthorityLevel.HUMAN_IN_LOOP:
+                for action in self.hmt.action_history:
+                    if (action.action_type == ActionType.ENGAGE and
+                        action.status in [ActionStatus.APPROVED, ActionStatus.AUTO_APPROVED]):
+                        approved_engagements.add((action.entity_id, action.target_id))
+            elif self.hmt.config.authority_level in [AuthorityLevel.FULL_AUTO, AuthorityLevel.HUMAN_ON_LOOP]:
+                # In full_auto or human_on_loop, all engagements are allowed
+                approved_engagements = None  # None means all allowed
+
         for interceptor in self.state.interceptors:
             # Skip interceptors that have already hit a target
             if interceptor.id in intercepted_interceptor_ids:
@@ -576,6 +710,7 @@ class SimEngine:
 
             # Phase 5: Use WTA assignment to get assigned target
             assigned_target = None
+            assigned_target_id = None
             if self.assignments:
                 assigned_target_id = self.assignments.get_target_for_interceptor(interceptor.id)
                 if assigned_target_id:
@@ -591,6 +726,14 @@ class SimEngine:
                     active_targets,
                     key=lambda t: interceptor.position.distance_to(t.position)
                 )
+                assigned_target_id = assigned_target.id
+
+            # Phase 7: HMT human-in-loop check
+            # If in human-in-loop mode and engagement not approved, coast instead
+            if approved_engagements is not None and (interceptor.id, assigned_target_id) not in approved_engagements:
+                # Not approved yet - coast (maintain velocity, no acceleration)
+                interceptor.set_acceleration(Vec3.zero())
+                continue
 
             # Create a temporary state view for this interceptor-target pair
             # This allows guidance to work with single interceptor/target abstraction
@@ -655,7 +798,93 @@ class SimEngine:
                                 current_time=self.state.sim_time
                             )
 
-        # 5. PHYSICS: Update all entities (skip intercepted ones)
+        # 5. SWARM: Apply swarm steering to interceptors (Phase 7)
+        if self.swarm:
+            active_interceptors = [
+                i for i in self.state.interceptors
+                if i.id not in intercepted_interceptor_ids
+            ]
+            self.swarm.update(active_interceptors, dt)
+
+            for interceptor in active_interceptors:
+                swarm_accel = self.swarm.compute_steering(interceptor, active_interceptors)
+                interceptor.acceleration = interceptor.acceleration + swarm_accel
+
+        # 6. DATALINK: Update communication model (Phase 7)
+        if self.datalink:
+            # Update entity positions in datalink
+            for entity in self.state.targets + self.state.interceptors:
+                self.datalink.update_entity_position(entity.id, entity.position)
+
+            # Process message delivery
+            delivered = self.datalink.update(self.state.sim_time)
+            # Messages could be processed here for networked fire control
+
+        # 7. HMT: Update human-machine teaming (Phase 7)
+        if self.hmt:
+            timed_out = self.hmt.update(self.state.sim_time)
+            # Handle timed out actions if needed
+
+            # Propose engagement actions for human-in-loop mode
+            from .hmt import AuthorityLevel, ActionType, PendingAction, ActionStatus
+            if self.hmt.config.authority_level == AuthorityLevel.HUMAN_IN_LOOP:
+                # Propose engagement for each active interceptor-target pair
+                for interceptor in self.state.interceptors:
+                    if interceptor.id in intercepted_interceptor_ids:
+                        continue
+
+                    # Get assigned target
+                    assigned_target_id = None
+                    if self.assignments:
+                        assigned_target_id = self.assignments.get_target_for_interceptor(interceptor.id)
+
+                    # Fallback: If no WTA assignment, use nearest target (same logic as guidance)
+                    if assigned_target_id is None and active_targets:
+                        nearest_target = min(
+                            active_targets,
+                            key=lambda t: interceptor.position.distance_to(t.position)
+                        )
+                        assigned_target_id = nearest_target.id
+
+                    if assigned_target_id:
+                        # Check if there's already a pending OR approved action for this pair
+                        action_key = f"{interceptor.id}_{assigned_target_id}"
+                        existing_pending = any(
+                            a.entity_id == interceptor.id and a.target_id == assigned_target_id
+                            for a in self.hmt.pending_actions.values()
+                        )
+                        # Also check if already approved in history
+                        already_approved = any(
+                            a.entity_id == interceptor.id and
+                            a.target_id == assigned_target_id and
+                            a.status in [ActionStatus.APPROVED, ActionStatus.AUTO_APPROVED]
+                            for a in self.hmt.action_history
+                        )
+
+                        if not existing_pending and not already_approved:
+                            # Calculate confidence based on geometry
+                            target = next((t for t in active_targets if t.id == assigned_target_id), None)
+                            if target:
+                                dist = interceptor.position.distance_to(target.position)
+                                # Higher confidence when closer
+                                confidence = max(0.3, min(0.95, 1.0 - (dist / 5000)))
+
+                                action = PendingAction.create(
+                                    action_type=ActionType.ENGAGE,
+                                    entity_id=interceptor.id,
+                                    target_id=assigned_target_id,
+                                    confidence=confidence,
+                                    details={
+                                        "range": dist,
+                                        "action_key": action_key,
+                                    },
+                                    timestamp=self.state.sim_time,
+                                    timeout=self.hmt.config.approval_timeout
+                                )
+                                self.hmt.propose_action(action)
+            # Handle timed out actions if needed
+
+        # 8. PHYSICS: Update all entities (skip intercepted ones)
         for target in self.state.targets:
             if target.id in intercepted_target_ids:
                 # Stop intercepted targets
@@ -669,14 +898,14 @@ class SimEngine:
                 continue
             interceptor.update(dt)
 
-        # 6. Update sim time
+        # 9. Update sim time
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 7. Check end conditions
+        # 10. Check end conditions
         self._check_end_conditions()
 
-        # 8. Emit state event (include WTA assignments)
+        # 11. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
     async def run(self) -> SimState:
@@ -868,6 +1097,65 @@ SCENARIOS = {
         "evasion": EvasionType.NONE,
         "num_targets": 4,
         "target_spacing": 300.0,
+    },
+    # Phase 7: Swarm scenarios
+    "swarm_v_formation": {
+        "description": "4 interceptors in V-formation vs 2 targets",
+        "target_start": Vec3(4000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.NONE,
+        "num_interceptors": 4,
+        "num_targets": 2,
+        "target_spacing": 500.0,
+        "interceptor_spacing": 150.0,
+        "enable_swarm": True,
+        "swarm_formation": "v_formation",
+        "swarm_spacing": 200.0,
+    },
+    "swarm_echelon": {
+        "description": "4 interceptors in echelon vs 2 weaving targets",
+        "target_start": Vec3(4000, 0, 800),
+        "target_velocity": Vec3(-100, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.WEAVE,
+        "num_interceptors": 4,
+        "num_targets": 2,
+        "target_spacing": 400.0,
+        "interceptor_spacing": 150.0,
+        "enable_swarm": True,
+        "swarm_formation": "echelon_right",
+        "swarm_spacing": 180.0,
+    },
+    "swarm_line_abreast": {
+        "description": "6 interceptors line abreast vs 3 targets",
+        "target_start": Vec3(4500, 0, 900),
+        "target_velocity": Vec3(-110, 0, -5),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(160, 0, 25),
+        "evasion": EvasionType.NONE,
+        "num_interceptors": 6,
+        "num_targets": 3,
+        "target_spacing": 350.0,
+        "interceptor_spacing": 120.0,
+        "enable_swarm": True,
+        "swarm_formation": "line_abreast",
+        "swarm_spacing": 250.0,
+    },
+    "swarm_diamond": {
+        "description": "4 interceptors in diamond vs 1 evading target",
+        "target_start": Vec3(3500, 0, 800),
+        "target_velocity": Vec3(-90, 0, 0),
+        "interceptor_start": Vec3(0, 0, 600),
+        "interceptor_velocity": Vec3(150, 0, 20),
+        "evasion": EvasionType.RANDOM_JINK,
+        "num_interceptors": 4,
+        "num_targets": 1,
+        "enable_swarm": True,
+        "swarm_formation": "diamond",
+        "swarm_spacing": 200.0,
     },
 }
 

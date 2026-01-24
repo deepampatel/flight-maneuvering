@@ -29,6 +29,16 @@ import type {
   HandoffRequestCreate,
   // Phase 6.4: ML
   MLStatus,
+  // Phase 7
+  SwarmStatus,
+  SwarmConfig,
+  FormationInfo,
+  FormationType,
+  HMTStatus,
+  HMTConfig,
+  PendingAction,
+  AuthorityLevel,
+  AuthorityLevelInfo,
 } from '../types';
 
 interface ControlPanelProps {
@@ -52,6 +62,14 @@ interface ControlPanelProps {
     enableDrag?: boolean;
     // Phase 6: Cooperative
     enableCooperative?: boolean;
+    // Phase 7
+    enableSwarm?: boolean;
+    swarmFormation?: FormationType;
+    swarmSpacing?: number;
+    enableHmt?: boolean;
+    hmtAuthorityLevel?: AuthorityLevel;
+    enableDatalink?: boolean;
+    enableTerrain?: boolean;
   }) => void;
   onStop: () => void;
   onRunMonteCarlo: (options: {
@@ -114,6 +132,22 @@ interface ControlPanelProps {
   // Phase 6.4: ML
   mlStatus?: MLStatus | null;
   onFetchMLStatus?: () => void;
+  // Phase 7: Swarm
+  swarmStatus?: SwarmStatus | null;
+  formationTypes?: FormationInfo[];
+  onFetchSwarmStatus?: () => void;
+  onConfigureSwarm?: (config: Partial<SwarmConfig>) => void;
+  onSetSwarmFormation?: (formation: FormationType) => void;
+  // Phase 7: HMT
+  hmtStatus?: HMTStatus | null;
+  authorityLevels?: AuthorityLevelInfo[];
+  pendingActions?: PendingAction[];
+  onFetchHMTStatus?: () => void;
+  onFetchPendingActions?: () => void;
+  onApproveAction?: (actionId: string, reason?: string) => void;
+  onRejectAction?: (actionId: string, reason?: string) => void;
+  onSetAuthorityLevel?: (level: AuthorityLevel) => void;
+  onConfigureHMT?: (config: Partial<HMTConfig>) => void;
 }
 
 export function ControlPanel({
@@ -168,6 +202,22 @@ export function ControlPanel({
   // Phase 6.4: ML
   mlStatus,
   onFetchMLStatus,
+  // Phase 7: Swarm
+  swarmStatus,
+  formationTypes,
+  onFetchSwarmStatus,
+  onConfigureSwarm,
+  onSetSwarmFormation,
+  // Phase 7: HMT
+  hmtStatus,
+  authorityLevels,
+  pendingActions,
+  onFetchHMTStatus,
+  onFetchPendingActions,
+  onApproveAction,
+  onRejectAction,
+  onSetAuthorityLevel,
+  onConfigureHMT: _onConfigureHMT,  // Reserved for future
 }: ControlPanelProps) {
   // Suppress unused warnings for reserved handlers
   void _onDeleteEngagementZone;
@@ -179,6 +229,7 @@ export function ControlPanel({
   void _plannedZones;
   void _onClearPlanner;
   void _onRemovePlannedEntity;
+  void _onConfigureHMT;
   const [selectedScenario, setSelectedScenario] = useState('head_on');
   const [selectedGuidance, setSelectedGuidance] = useState('proportional_nav');
   const [navConstant, setNavConstant] = useState(4.0);
@@ -193,6 +244,18 @@ export function ControlPanel({
   const [enableDrag, setEnableDrag] = useState(false);
   // Phase 6: Cooperative state
   const [enableCooperative, setEnableCooperative] = useState(false);
+  // Phase 7: Swarm state
+  const [enableSwarm, setEnableSwarm] = useState(false);
+  const [swarmFormation, setSwarmFormation] = useState<FormationType>('line_abreast');
+  const [swarmSpacing, setSwarmSpacing] = useState(100);
+  // Phase 7: HMT state
+  const [enableHmt, setEnableHmt] = useState(false);
+  const [hmtAuthorityLevel, setHmtAuthorityLevel] = useState<AuthorityLevel>('human_on_loop');
+  // Phase 7: Other (enable via Swarm panel for simplicity)
+  const [enableDatalink, _setEnableDatalink] = useState(false);
+  const [enableTerrain, _setEnableTerrain] = useState(false);
+  void _setEnableDatalink;
+  void _setEnableTerrain;
   const [mcResults, setMcResults] = useState<MonteCarloResults | null>(null);
   const [envelopeResults, setEnvelopeResults] = useState<EnvelopeResults | null>(null);
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -220,16 +283,32 @@ export function ControlPanel({
         if (onFetchCooperativeState && enableCooperative) {
           onFetchCooperativeState();
         }
+        // Phase 7: Fetch swarm status
+        if (onFetchSwarmStatus && enableSwarm) {
+          onFetchSwarmStatus();
+        }
+        // Phase 7: Fetch HMT status and pending actions
+        if (enableHmt) {
+          if (onFetchHMTStatus) onFetchHMTStatus();
+          if (onFetchPendingActions) onFetchPendingActions();
+        }
       }, 200);
       return () => clearInterval(interval);
     }
-  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative]);
+  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative, onFetchSwarmStatus, enableSwarm, onFetchHMTStatus, onFetchPendingActions, enableHmt]);
 
-  // Phase 5: Update numTargets when scenario changes
+  // Phase 5: Update numTargets and evasion when scenario changes
   useEffect(() => {
     const scenario = scenarios[selectedScenario];
-    if (scenario?.num_targets) {
-      setNumTargets(scenario.num_targets);
+    if (scenario) {
+      // Update targets if scenario has multi-target settings
+      if (scenario.num_targets) {
+        setNumTargets(scenario.num_targets);
+      }
+      // Update evasion to match scenario preset
+      if (scenario.evasion && scenario.evasion !== 'none') {
+        setSelectedEvasion(scenario.evasion);
+      }
     }
   }, [selectedScenario, scenarios]);
 
@@ -249,6 +328,14 @@ export function ControlPanel({
       enableDrag,
       // Phase 6: Cooperative
       enableCooperative,
+      // Phase 7
+      enableSwarm,
+      swarmFormation,
+      swarmSpacing,
+      enableHmt,
+      hmtAuthorityLevel,
+      enableDatalink,
+      enableTerrain,
     });
   };
 
@@ -659,6 +746,25 @@ export function ControlPanel({
             >
               ML/AI
             </button>
+            <button
+              className={activePanel === 'swarm' ? 'active' : ''}
+              onClick={() => {
+                togglePanel('swarm');
+                if (onFetchSwarmStatus) onFetchSwarmStatus();
+              }}
+            >
+              Swarm
+            </button>
+            <button
+              className={activePanel === 'hmt' ? 'active' : ''}
+              onClick={() => {
+                togglePanel('hmt');
+                if (onFetchHMTStatus) onFetchHMTStatus();
+                if (onFetchPendingActions) onFetchPendingActions();
+              }}
+            >
+              HMT {pendingActions && pendingActions.length > 0 ? `(${pendingActions.length})` : ''}
+            </button>
           </div>
 
           {/* Monte Carlo Content */}
@@ -966,6 +1072,239 @@ export function ControlPanel({
                   <p>Load ONNX models via API:</p>
                   <code>POST /ml/models/load</code>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Swarm Content */}
+          {activePanel === 'swarm' && (
+            <div className="advanced-content">
+              <p className="panel-desc">Configure swarm tactics and formations</p>
+
+              <div className="env-controls">
+                <div className="env-row checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enableSwarm}
+                      onChange={(e) => setEnableSwarm(e.target.checked)}
+                      disabled={isRunning}
+                    />
+                    Enable Swarm Tactics
+                  </label>
+                </div>
+
+                {enableSwarm && (
+                  <>
+                    <div className="env-row">
+                      <label>Formation</label>
+                      <select
+                        value={swarmFormation}
+                        onChange={(e) => {
+                          setSwarmFormation(e.target.value as FormationType);
+                          if (isRunning && onSetSwarmFormation) {
+                            onSetSwarmFormation(e.target.value as FormationType);
+                          }
+                        }}
+                      >
+                        {formationTypes && formationTypes.length > 0 ? (
+                          formationTypes.map((f) => (
+                            <option key={f.id} value={f.id} title={f.description}>
+                              {f.name}
+                            </option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="line_abreast">Line Abreast</option>
+                            <option value="echelon_right">Echelon Right</option>
+                            <option value="echelon_left">Echelon Left</option>
+                            <option value="v_formation">V-Formation</option>
+                            <option value="wedge">Wedge</option>
+                            <option value="trail">Trail</option>
+                            <option value="diamond">Diamond</option>
+                            <option value="swarm">Free Swarm</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="env-row">
+                      <label>Spacing: {swarmSpacing}m</label>
+                      <input
+                        type="range"
+                        min="50"
+                        max="500"
+                        step="25"
+                        value={swarmSpacing}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value);
+                          setSwarmSpacing(value);
+                          if (isRunning && onConfigureSwarm) {
+                            onConfigureSwarm({ spacing: value });
+                          }
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Swarm status during simulation */}
+                {isRunning && enableSwarm && swarmStatus?.enabled && (
+                  <div className="env-state">
+                    <div className="env-state-title">Swarm Status</div>
+                    <div className="env-state-row">
+                      <span>Leader: {swarmStatus.state?.leader_id || 'None'}</span>
+                    </div>
+                    <div className="env-state-row">
+                      <span>Formation: {swarmStatus.state?.formation || swarmFormation}</span>
+                    </div>
+                    <div className="env-state-row">
+                      <span>Error: {swarmStatus.state?.formation_error?.toFixed(1) || 0}m</span>
+                      <span>Cohesion: {((swarmStatus.state?.cohesion_metric || 0) * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Help text when swarm enabled but not running */}
+                {enableSwarm && !isRunning && (
+                  <div className="env-state">
+                    <div className="env-state-title">Swarm Mode</div>
+                    <p className="panel-desc" style={{ margin: '4px 0' }}>
+                      Interceptors will fly in {swarmFormation.replace('_', ' ')} formation
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* HMT Content */}
+          {activePanel === 'hmt' && (
+            <div className="advanced-content">
+              <p className="panel-desc">Human-Machine Teaming: Control automation authority</p>
+
+              <div className="env-controls">
+                <div className="env-row checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enableHmt}
+                      onChange={(e) => setEnableHmt(e.target.checked)}
+                      disabled={isRunning}
+                    />
+                    Enable Human-Machine Teaming
+                  </label>
+                </div>
+
+                {enableHmt && (
+                  <div className="env-row">
+                    <label>Authority Level</label>
+                    <select
+                      value={hmtAuthorityLevel}
+                      onChange={(e) => {
+                        const level = e.target.value as AuthorityLevel;
+                        setHmtAuthorityLevel(level);
+                        if (isRunning && onSetAuthorityLevel) {
+                          onSetAuthorityLevel(level);
+                        }
+                      }}
+                    >
+                      {authorityLevels && authorityLevels.length > 0 ? (
+                        authorityLevels.map((a) => (
+                          <option key={a.id} value={a.id} title={a.description}>
+                            {a.name}
+                          </option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="full_auto">Full Auto</option>
+                          <option value="human_on_loop">Human on Loop</option>
+                          <option value="human_in_loop">Human in Loop</option>
+                          <option value="manual">Manual</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                )}
+
+                {/* HMT Status */}
+                {isRunning && enableHmt && hmtStatus?.enabled && (
+                  <div className="env-state">
+                    <div className="env-state-title">HMT Metrics</div>
+                    <div className="env-state-row">
+                      <span>Authority: {hmtStatus.metrics?.authority_level || hmtAuthorityLevel}</span>
+                    </div>
+                    <div className="env-state-row">
+                      <span>Workload: {hmtStatus.metrics?.workload.actions_per_minute?.toFixed(1) || 0}/min</span>
+                    </div>
+                    <div className="env-state-row">
+                      <span>Trust: {((hmtStatus.metrics?.trust.ai_accuracy || 0) * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Actions */}
+                {isRunning && enableHmt && pendingActions && pendingActions.length > 0 && (
+                  <div className="env-state">
+                    <div className="env-state-title" style={{ color: '#ff9500' }}>
+                      Pending Actions ({pendingActions.length})
+                    </div>
+                    <div className="pending-actions-list">
+                      {pendingActions.slice(0, 5).map((action) => (
+                        <div key={action.action_id} className="pending-action">
+                          <div className="action-info">
+                            <span className="action-type">{action.action_type.toUpperCase()}</span>
+                            <span className="action-entity">{action.entity_id}</span>
+                            {action.target_id && (
+                              <span className="action-target">→ {action.target_id}</span>
+                            )}
+                            <span className="action-confidence">
+                              {(action.confidence * 100).toFixed(0)}%
+                            </span>
+                            <span className="action-timeout">
+                              {action.time_remaining.toFixed(1)}s
+                            </span>
+                          </div>
+                          <div className="action-buttons">
+                            <button
+                              className="btn-approve"
+                              onClick={() => onApproveAction && onApproveAction(action.action_id)}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              className="btn-reject"
+                              onClick={() => onRejectAction && onRejectAction(action.action_id)}
+                            >
+                              ✗
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Authority Level Descriptions */}
+                {enableHmt && !isRunning && (
+                  <div className="env-state">
+                    <div className="env-state-title">Authority Levels</div>
+                    <div className="authority-descriptions">
+                      <div className={`auth-desc ${hmtAuthorityLevel === 'full_auto' ? 'active' : ''}`}>
+                        <strong>Full Auto:</strong> AI acts autonomously, human notified
+                      </div>
+                      <div className={`auth-desc ${hmtAuthorityLevel === 'human_on_loop' ? 'active' : ''}`}>
+                        <strong>Human on Loop:</strong> AI acts, human can override
+                      </div>
+                      <div className={`auth-desc ${hmtAuthorityLevel === 'human_in_loop' ? 'active' : ''}`}>
+                        <strong>Human in Loop:</strong> AI proposes, human approves
+                      </div>
+                      <div className={`auth-desc ${hmtAuthorityLevel === 'manual' ? 'active' : ''}`}>
+                        <strong>Manual:</strong> Human controls all actions
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

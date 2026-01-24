@@ -47,6 +47,19 @@ import type {
   HandoffRequestCreate,
   // Phase 6.4: ML
   MLStatus,
+  // Phase 7
+  SwarmStatus,
+  SwarmConfig,
+  FormationInfo,
+  FormationType,
+  HMTStatus,
+  HMTConfig,
+  PendingAction,
+  AuthorityLevel,
+  AuthorityLevelInfo,
+  DatalinkStatus,
+  TerrainStatus,
+  Phase7Status,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -85,6 +98,17 @@ interface RunOptions {
   // Mission Planner: Custom entities
   customEntities?: PlannedEntity[];
   customZones?: PlannedZone[];
+  // Phase 7: Swarm
+  enableSwarm?: boolean;
+  swarmFormation?: FormationType;
+  swarmSpacing?: number;
+  // Phase 7: HMT
+  enableHmt?: boolean;
+  hmtAuthorityLevel?: AuthorityLevel;
+  // Phase 7: Datalink
+  enableDatalink?: boolean;
+  // Phase 7: Terrain
+  enableTerrain?: boolean;
 }
 
 interface MonteCarloOptions {
@@ -163,6 +187,31 @@ interface UseSimulationReturn {
   // Phase 6.4: ML
   mlStatus: MLStatus | null;
   fetchMLStatus: () => Promise<void>;
+  // Phase 7: Swarm
+  swarmStatus: SwarmStatus | null;
+  formationTypes: FormationInfo[];
+  fetchSwarmStatus: () => Promise<void>;
+  configureSwarm: (config: Partial<SwarmConfig>) => Promise<void>;
+  setSwarmFormation: (formation: FormationType) => Promise<void>;
+  // Phase 7: HMT
+  hmtStatus: HMTStatus | null;
+  authorityLevels: AuthorityLevelInfo[];
+  pendingActions: PendingAction[];
+  fetchHMTStatus: () => Promise<void>;
+  fetchPendingActions: () => Promise<void>;
+  approveAction: (actionId: string, reason?: string) => Promise<void>;
+  rejectAction: (actionId: string, reason?: string) => Promise<void>;
+  setAuthorityLevel: (level: AuthorityLevel) => Promise<void>;
+  configureHMT: (config: Partial<HMTConfig>) => Promise<void>;
+  // Phase 7: Datalink
+  datalinkStatus: DatalinkStatus | null;
+  fetchDatalinkStatus: () => Promise<void>;
+  // Phase 7: Terrain
+  terrainStatus: TerrainStatus | null;
+  fetchTerrainStatus: () => Promise<void>;
+  // Phase 7: Combined status
+  phase7Status: Phase7Status | null;
+  fetchPhase7Status: () => Promise<void>;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -194,6 +243,20 @@ export function useSimulation(): UseSimulationReturn {
   const [cooperativeState, setCooperativeState] = useState<CooperativeState | null>(null);
   // Phase 6.4: ML
   const [mlStatus, setMLStatus] = useState<MLStatus | null>(null);
+  // Phase 7: Swarm
+  const [swarmStatus, setSwarmStatus] = useState<SwarmStatus | null>(null);
+  const [formationTypes, setFormationTypes] = useState<FormationInfo[]>([]);
+  // Phase 7: HMT
+  const [hmtStatus, setHMTStatus] = useState<HMTStatus | null>(null);
+  const [authorityLevels, setAuthorityLevels] = useState<AuthorityLevelInfo[]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  // Phase 7: Datalink
+  const [datalinkStatus, setDatalinkStatus] = useState<DatalinkStatus | null>(null);
+  // Phase 7: Terrain
+  const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
+  // Phase 7: Combined
+  const [phase7Status, setPhase7Status] = useState<Phase7Status | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
 
@@ -219,6 +282,24 @@ export function useSimulation(): UseSimulationReturn {
       .then((res) => res.json())
       .then((data) => setWtaAlgorithms(data.algorithms))
       .catch(console.error);
+
+    // Phase 7: Fetch formation types
+    fetch(`${API_URL}/swarm/formations`)
+      .then((res) => res.json())
+      .then((data) => setFormationTypes(data.formations || []))
+      .catch(console.error);
+
+    // Phase 7: Fetch authority levels
+    fetch(`${API_URL}/hmt/authority-levels`)
+      .then((res) => res.json())
+      .then((data) => setAuthorityLevels(data.authority_levels || []))
+      .catch(console.error);
+
+    // Phase 7: Fetch combined status
+    fetch(`${API_URL}/phase7/status`)
+      .then((res) => res.json())
+      .then((data) => setPhase7Status(data))
+      .catch(console.error);
   }, []);
 
   // WebSocket connection management
@@ -241,6 +322,10 @@ export function useSimulation(): UseSimulationReturn {
           // Phase 5: Extract assignments from state event if present
           if (data.assignments) {
             setAssignments(data.assignments);
+          }
+          // Phase 7: Extract HMT pending actions from state event
+          if (data.hmt?.pending_actions) {
+            setPendingActions(data.hmt.pending_actions);
           }
         } else if (data.type === 'complete') {
           console.log('Simulation complete:', data.result);
@@ -313,6 +398,17 @@ export function useSimulation(): UseSimulationReturn {
         // Mission Planner: Custom entities
         custom_entities: options.customEntities,
         custom_zones: options.customZones,
+        // Phase 7: Swarm
+        enable_swarm: options.enableSwarm || false,
+        swarm_formation: options.swarmFormation,
+        swarm_spacing: options.swarmSpacing,
+        // Phase 7: HMT
+        enable_hmt: options.enableHmt || false,
+        hmt_authority_level: options.hmtAuthorityLevel,
+        // Phase 7: Datalink
+        enable_datalink: options.enableDatalink || false,
+        // Phase 7: Terrain
+        enable_terrain: options.enableTerrain || false,
       }),
     });
 
@@ -729,6 +825,182 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
+  // Phase 7: Fetch swarm status
+  const fetchSwarmStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/swarm/status`);
+      if (response.ok) {
+        const data: SwarmStatus = await response.json();
+        setSwarmStatus(data);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
+  // Phase 7: Configure swarm
+  const configureSwarm = useCallback(async (config: Partial<SwarmConfig>) => {
+    try {
+      const response = await fetch(`${API_URL}/swarm/configure`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      if (response.ok) {
+        await fetchSwarmStatus();
+      }
+    } catch (e) {
+      console.error('Failed to configure swarm:', e);
+    }
+  }, [fetchSwarmStatus]);
+
+  // Phase 7: Set swarm formation
+  const setSwarmFormation = useCallback(async (formation: FormationType) => {
+    try {
+      const response = await fetch(`${API_URL}/swarm/formation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ formation }),
+      });
+      if (response.ok) {
+        await fetchSwarmStatus();
+      }
+    } catch (e) {
+      console.error('Failed to set formation:', e);
+    }
+  }, [fetchSwarmStatus]);
+
+  // Phase 7: Fetch HMT status
+  const fetchHMTStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/status`);
+      if (response.ok) {
+        const data: HMTStatus = await response.json();
+        setHMTStatus(data);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
+  // Phase 7: Fetch pending actions
+  const fetchPendingActions = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/pending`);
+      if (response.ok) {
+        const data = await response.json();
+        setPendingActions(data.pending || []);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
+  // Phase 7: Approve action
+  const approveAction = useCallback(async (actionId: string, reason?: string) => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/approve/${actionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (response.ok) {
+        await fetchPendingActions();
+        await fetchHMTStatus();
+      }
+    } catch (e) {
+      console.error('Failed to approve action:', e);
+    }
+  }, [fetchPendingActions, fetchHMTStatus]);
+
+  // Phase 7: Reject action
+  const rejectAction = useCallback(async (actionId: string, reason?: string) => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/reject/${actionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (response.ok) {
+        await fetchPendingActions();
+        await fetchHMTStatus();
+      }
+    } catch (e) {
+      console.error('Failed to reject action:', e);
+    }
+  }, [fetchPendingActions, fetchHMTStatus]);
+
+  // Phase 7: Set authority level
+  const setAuthorityLevel = useCallback(async (level: AuthorityLevel) => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/authority`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authority_level: level }),
+      });
+      if (response.ok) {
+        await fetchHMTStatus();
+      }
+    } catch (e) {
+      console.error('Failed to set authority level:', e);
+    }
+  }, [fetchHMTStatus]);
+
+  // Phase 7: Configure HMT
+  const configureHMT = useCallback(async (config: Partial<HMTConfig>) => {
+    try {
+      const response = await fetch(`${API_URL}/hmt/configure`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      if (response.ok) {
+        await fetchHMTStatus();
+      }
+    } catch (e) {
+      console.error('Failed to configure HMT:', e);
+    }
+  }, [fetchHMTStatus]);
+
+  // Phase 7: Fetch datalink status
+  const fetchDatalinkStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/datalink/status`);
+      if (response.ok) {
+        const data: DatalinkStatus = await response.json();
+        setDatalinkStatus(data);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
+  // Phase 7: Fetch terrain status
+  const fetchTerrainStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/terrain/status`);
+      if (response.ok) {
+        const data: TerrainStatus = await response.json();
+        setTerrainStatus(data);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
+  // Phase 7: Fetch combined Phase 7 status
+  const fetchPhase7Status = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/phase7/status`);
+      if (response.ok) {
+        const data: Phase7Status = await response.json();
+        setPhase7Status(data);
+      }
+    } catch (e) {
+      // Silently fail if not available
+    }
+  }, []);
+
   return {
     connected,
     state,
@@ -789,5 +1061,30 @@ export function useSimulation(): UseSimulationReturn {
     // Phase 6.4: ML
     mlStatus,
     fetchMLStatus,
+    // Phase 7: Swarm
+    swarmStatus,
+    formationTypes,
+    fetchSwarmStatus,
+    configureSwarm,
+    setSwarmFormation,
+    // Phase 7: HMT
+    hmtStatus,
+    authorityLevels,
+    pendingActions,
+    fetchHMTStatus,
+    fetchPendingActions,
+    approveAction,
+    rejectAction,
+    setAuthorityLevel,
+    configureHMT,
+    // Phase 7: Datalink
+    datalinkStatus,
+    fetchDatalinkStatus,
+    // Phase 7: Terrain
+    terrainStatus,
+    fetchTerrainStatus,
+    // Phase 7: Combined
+    phase7Status,
+    fetchPhase7Status,
   };
 }

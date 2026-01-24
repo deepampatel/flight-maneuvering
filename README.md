@@ -2,6 +2,36 @@
 
 A real-time air intercept simulation sandbox for learning guidance, control, and autonomy concepts.
 
+## Phase 7: Swarm Tactics, Terrain, Communications & Human-Machine Teaming ✓
+
+Building on Phase 6, this phase adds four major feature sets for advanced multi-agent scenarios:
+
+- **Swarm Tactics & Coordination**: Multi-agent autonomous behavior
+  - Formation control (V-formation, line abreast, echelon, wedge, trail, diamond)
+  - Reynolds flocking (separation, alignment, cohesion)
+  - Leader following with dynamic slot assignment
+  - Collision avoidance
+  - Tactical maneuvers (saturation, pincer, defensive sphere)
+- **Advanced Terrain & 3D Environment**: Physical world modeling
+  - Digital Elevation Model (DEM) integration
+  - Procedural terrain generation (multi-octave noise)
+  - Line-of-sight terrain masking
+  - Radar horizon calculations (4/3 Earth radius)
+  - Urban environment (building LOS blocking)
+- **Communication & Datalink Modeling**: Information flow constraints
+  - Bandwidth-limited transmission (configurable kbps)
+  - Latency with jitter modeling
+  - Packet loss (range-dependent + random)
+  - Priority queue for critical messages
+  - Jamming effects
+  - Networked fire control coordination
+- **Human-Machine Teaming**: Operator interaction patterns
+  - Authority levels (full auto, human-on-loop, human-in-loop, manual)
+  - Action proposal and approval workflow
+  - Workload metrics (decisions/minute, fatigue level)
+  - Trust calibration (AI accuracy, override rate)
+  - Timeout handling with configurable auto-approve
+
 ## Phase 6: Environmental Effects, Kalman Filter, Cooperative Engagement & AI/ML ✓
 
 Building on Phase 5, this phase adds four major feature sets:
@@ -358,10 +388,14 @@ air-dominance/
 │   │   ├── kalman.py       # Kalman filter implementation (Phase 6)
 │   │   ├── fusion.py       # Multi-sensor track fusion (Phase 6)
 │   │   ├── cooperation.py  # Cooperative engagement (Phase 6)
-│   │   └── ml/             # AI/ML module (Phase 6)
-│   │       ├── __init__.py
-│   │       ├── inference.py  # ONNX model loading/inference
-│   │       └── features.py   # Feature extraction for ML
+│   │   ├── ml/             # AI/ML module (Phase 6)
+│   │   │   ├── __init__.py
+│   │   │   ├── inference.py  # ONNX model loading/inference
+│   │   │   └── features.py   # Feature extraction for ML
+│   │   ├── swarm.py        # Swarm tactics & formations (Phase 7)
+│   │   ├── terrain.py      # DEM & terrain masking (Phase 7)
+│   │   ├── datalink.py     # Communication modeling (Phase 7)
+│   │   └── hmt.py          # Human-machine teaming (Phase 7)
 │   ├── recordings/         # Saved simulation recordings
 │   └── server.py           # FastAPI + WebSocket server
 ├── frontend/
@@ -418,27 +452,45 @@ air-dominance/
 | `/ml/models` | GET | List available ML models |
 | `/ml/models/load` | POST | Load ML model |
 | `/ml/models/unload/{id}` | POST | Unload ML model |
+| `/swarm/status` | GET | Get swarm subsystem status |
+| `/swarm/formations` | GET | List available formations |
+| `/swarm/configure` | POST | Configure swarm behavior |
+| `/swarm/set-leader/{id}` | POST | Set swarm leader |
+| `/terrain/status` | GET | Get terrain subsystem status |
+| `/terrain/elevation` | GET | Get terrain elevation at point |
+| `/terrain/los` | GET | Check line-of-sight between points |
+| `/terrain/heightmap` | GET | Get terrain heightmap for visualization |
+| `/terrain/generate` | POST | Generate procedural terrain |
+| `/datalink/status` | GET | Get datalink subsystem status |
+| `/datalink/configure` | POST | Configure datalink parameters |
+| `/datalink/link-quality/{e1}/{e2}` | GET | Get link quality between entities |
+| `/datalink/jammers` | POST | Add a jamming source |
+| `/datalink/jammers/{id}` | DELETE | Remove a jamming source |
+| `/hmt/status` | GET | Get HMT subsystem status |
+| `/hmt/authority-levels` | GET | List authority levels |
+| `/hmt/configure` | POST | Configure HMT parameters |
+| `/hmt/pending` | GET | Get pending actions awaiting approval |
+| `/hmt/approve/{id}` | POST | Approve a pending action |
+| `/hmt/reject/{id}` | POST | Reject a pending action |
+| `/hmt/history` | GET | Get action history |
+| `/phase7/status` | GET | Get all Phase 7 subsystem statuses |
 | `/ws` | WebSocket | Real-time 50Hz state stream |
 
-## Coming Up: Phase 7
+## Coming Up: Phase 8
 
-- **Swarm Tactics & Coordination**: Multi-agent autonomous behavior
-  - Swarm formation control (V-formation, line abreast, echelon)
-  - Distributed decision making without central controller
-  - Emergent behaviors (flocking, pursuit-evasion)
-  - Swarm-vs-swarm engagements
-- **Advanced Terrain & 3D Environment**: Physical world modeling
-  - Digital elevation maps (DEM) integration
-  - Terrain masking and line-of-sight blockage
-  - Radar horizon calculations
-  - Urban canyon effects on sensors
-- **Communication & Datalink Modeling**: Information flow constraints
-  - Bandwidth-limited datalinks
-  - Message latency and packet loss
-  - Link jamming and degraded modes
-  - Networked fire control
-- **Human-Machine Teaming**: Operator interaction patterns
-  - Supervisory control modes
-  - Authority levels (full auto, human-on-loop, human-in-loop)
-  - Operator workload modeling
-  - Trust calibration metrics
+- **Multi-Domain Operations**: Air-ground-sea integration
+  - Surface-to-air threats
+  - Ground target prosecution
+  - Maritime domain awareness
+- **Electronic Warfare**: Sensor degradation and countermeasures
+  - Radar jamming and ECCM
+  - IR countermeasures (flares, DIRCM)
+  - Stealth modeling (RCS reduction)
+- **Mission Planning & Replanning**: High-level autonomy
+  - Waypoint-based mission profiles
+  - Dynamic replanning on threat detection
+  - Fuel and weapon constraints
+- **Training & Scenarios**: Educational features
+  - Guided tutorials
+  - Challenge scenarios with scoring
+  - Performance analytics dashboard

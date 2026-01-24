@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { SimulationScene } from './components/Scene';
 import { ControlPanel } from './components/ControlPanel';
+import { HMTToast } from './components/HMTToast';
 import { useSimulation } from './hooks/useSimulation';
 import { useMissionPlanner } from './components/MissionPlanner';
 import './App.css';
@@ -57,6 +58,25 @@ function App() {
     deleteEngagementZone,
     assignInterceptorToZone,
     requestHandoff,
+    // Phase 6.4: ML
+    mlStatus,
+    fetchMLStatus,
+    // Phase 7: Swarm
+    swarmStatus,
+    formationTypes,
+    fetchSwarmStatus,
+    configureSwarm,
+    setSwarmFormation,
+    // Phase 7: HMT
+    hmtStatus,
+    authorityLevels,
+    pendingActions,
+    fetchHMTStatus,
+    fetchPendingActions,
+    approveAction,
+    rejectAction,
+    setAuthorityLevel,
+    configureHMT,
   } = useSimulation();
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -159,9 +179,36 @@ function App() {
             plannedZones={missionPlanner.plannedZones}
             onClearPlanner={missionPlanner.clearAll}
             onRemovePlannedEntity={missionPlanner.removeEntity}
+            // Phase 6.4: ML
+            mlStatus={mlStatus}
+            onFetchMLStatus={fetchMLStatus}
+            // Phase 7: Swarm
+            swarmStatus={swarmStatus}
+            formationTypes={formationTypes}
+            onFetchSwarmStatus={fetchSwarmStatus}
+            onConfigureSwarm={configureSwarm}
+            onSetSwarmFormation={setSwarmFormation}
+            // Phase 7: HMT
+            hmtStatus={hmtStatus}
+            authorityLevels={authorityLevels}
+            pendingActions={pendingActions}
+            onFetchHMTStatus={fetchHMTStatus}
+            onFetchPendingActions={fetchPendingActions}
+            onApproveAction={approveAction}
+            onRejectAction={rejectAction}
+            onSetAuthorityLevel={setAuthorityLevel}
+            onConfigureHMT={configureHMT}
           />
         </div>
       </header>
+
+      {/* HMT Toast - Floating notification for pending actions */}
+      <HMTToast
+        pendingActions={pendingActions}
+        onApprove={approveAction}
+        onReject={rejectAction}
+        enabled={isRunning}
+      />
 
       <main className="app-main">
         <div className="scene-container">
