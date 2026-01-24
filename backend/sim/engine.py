@@ -32,7 +32,7 @@ from .evasion import (
     EvasionFunction, create_evasion_function, no_evasion
 )
 from .assignment import (
-    WTAAlgorithm, AssignmentResult, compute_assignment
+    WTAAlgorithm, AssignmentResult, Assignment, compute_assignment
 )
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
@@ -69,6 +69,14 @@ except ImportError:
     HMT_AVAILABLE = False
     HumanMachineTeaming = None
     HMTConfig = None
+
+try:
+    from .launcher import LaunchPlatform, LauncherConfig, create_launcher
+    LAUNCHER_AVAILABLE = True
+except ImportError:
+    LAUNCHER_AVAILABLE = False
+    LaunchPlatform = None
+    LauncherConfig = None
 
 
 class SimStatus(str, Enum):
@@ -149,6 +157,9 @@ class SimState:
     # Phase 7: Human-Machine Teaming
     hmt: Optional['HumanMachineTeaming'] = None
 
+    # Phase 8: Launch platforms (bogeys)
+    launchers: List['LaunchPlatform'] = field(default_factory=list)
+
     # Legacy property for backward compatibility - single target
     @property
     def target(self) -> Entity:
@@ -167,6 +178,9 @@ class SimState:
         entities = [t.to_state_dict() for t in self.targets]
         entities.extend(i.to_state_dict() for i in self.interceptors)
 
+        # Handle infinite miss_distance (not JSON compliant)
+        miss_dist = self.miss_distance if self.miss_distance != float('inf') else -1
+
         event = {
             "type": "state",
             "run_id": self.run_id,
@@ -176,7 +190,7 @@ class SimState:
             "status": self.status.value,
             "result": self.result.value,
             "entities": entities,
-            "miss_distance": self.miss_distance,
+            "miss_distance": miss_dist,
             "intercepting_id": self.intercepting_id,
             "intercepted_target_id": self.intercepted_target_id,
             "intercepted_pairs": self.intercepted_pairs,
@@ -222,6 +236,10 @@ class SimState:
                 "workload": self.hmt.workload.to_dict(),
                 "trust": self.hmt.trust.to_dict(),
             }
+
+        # Phase 8: Include launcher state
+        if self.launchers:
+            event["launchers"] = [l.to_state_dict() for l in self.launchers]
 
         return event
 
@@ -500,8 +518,8 @@ class SimEngine:
             elif e.type == 'target':
                 targets.append(create_target(pos, vel, e.id))
 
-        if not interceptors:
-            raise ValueError("At least one interceptor required")
+        # Note: interceptors list can be empty if launchers will spawn them
+        # The check for "at least one interceptor OR launcher" happens in server.py
         if not targets:
             raise ValueError("At least one target required")
 
@@ -617,9 +635,15 @@ class SimEngine:
             self.state.result = EngagementResult.TIMEOUT
             return
 
+        # Check if launchers can still spawn interceptors
+        launchers_have_missiles = any(
+            l.missiles_remaining > 0 for l in self.state.launchers
+        ) if self.state.launchers else False
+
         # Check if all active interceptors have missed all active targets
         # Only check after initial approach phase (first 2 seconds)
-        if self.state.sim_time > 2.0 and active_interceptors and active_targets:
+        # Skip this check if launchers can still spawn more interceptors
+        if self.state.sim_time > 2.0 and active_interceptors and active_targets and not launchers_have_missiles:
             all_missed = True
             for interceptor in active_interceptors:
                 for target in active_targets:
@@ -682,18 +706,18 @@ class SimEngine:
         intercepted_interceptor_ids = set(pair[0] for pair in self.state.intercepted_pairs)
 
         # Phase 7: Track approved engagements for HMT human-in-loop mode
-        approved_engagements: set = set()  # Set of (interceptor_id, target_id)
+        # None = all engagements allowed (default when HMT disabled)
+        approved_engagements = None
         if self.hmt:
             from .hmt import AuthorityLevel, ActionType, ActionStatus
             # In human-in-loop mode, only allow approved engagements
             if self.hmt.config.authority_level == AuthorityLevel.HUMAN_IN_LOOP:
+                approved_engagements = set()  # Start with empty set
                 for action in self.hmt.action_history:
                     if (action.action_type == ActionType.ENGAGE and
                         action.status in [ActionStatus.APPROVED, ActionStatus.AUTO_APPROVED]):
                         approved_engagements.add((action.entity_id, action.target_id))
-            elif self.hmt.config.authority_level in [AuthorityLevel.FULL_AUTO, AuthorityLevel.HUMAN_ON_LOOP]:
-                # In full_auto or human_on_loop, all engagements are allowed
-                approved_engagements = None  # None means all allowed
+            # In full_auto or human_on_loop, all engagements are allowed (None)
 
         for interceptor in self.state.interceptors:
             # Skip interceptors that have already hit a target
@@ -884,7 +908,47 @@ class SimEngine:
                                 self.hmt.propose_action(action)
             # Handle timed out actions if needed
 
-        # 8. PHYSICS: Update all entities (skip intercepted ones)
+        # 8. LAUNCHERS: Update launch platforms and spawn new interceptors
+        if self.state.launchers:
+            for launcher in self.state.launchers:
+                new_interceptors = launcher.update(
+                    active_targets,
+                    self.state.sim_time,
+                    self.state.interceptors
+                )
+                # Add newly launched interceptors to the simulation
+                for interceptor in new_interceptors:
+                    self.state.interceptors.append(interceptor)
+                    # Update WTA assignments to include new interceptor
+                    # Find the target this interceptor was launched at
+                    target_id = None
+                    for event in launcher.launch_history:
+                        if event.interceptor_id == interceptor.id:
+                            target_id = event.target_id
+                            break
+
+                    if target_id:
+                        # Create assignment for this interceptor
+                        new_assignment = Assignment(
+                            interceptor_id=interceptor.id,
+                            target_id=target_id,
+                            cost=0.0,  # Launched interceptors have committed
+                            reason="launcher_auto"
+                        )
+                        # Add to existing assignments or create new AssignmentResult
+                        if self.assignments:
+                            self.assignments.assignments.append(new_assignment)
+                        else:
+                            self.assignments = AssignmentResult(
+                                assignments=[new_assignment],
+                                total_cost=0.0,
+                                algorithm="launcher_auto",
+                                unassigned_interceptors=[],
+                                unassigned_targets=[t.id for t in active_targets if t.id != target_id],
+                                timestamp=self.state.sim_time
+                            )
+
+        # 9. PHYSICS: Update all entities (skip intercepted ones)
         for target in self.state.targets:
             if target.id in intercepted_target_ids:
                 # Stop intercepted targets
@@ -898,14 +962,14 @@ class SimEngine:
                 continue
             interceptor.update(dt)
 
-        # 9. Update sim time
+        # 10. Update sim time
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 10. Check end conditions
+        # 11. Check end conditions
         self._check_end_conditions()
 
-        # 11. Emit state event (include WTA assignments)
+        # 12. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
     async def run(self) -> SimState:
@@ -954,12 +1018,13 @@ class SimEngine:
                 await asyncio.shield(self._emit_event(self.state.to_event(self.assignments)))
 
                 # Emit stopped event so UI knows simulation ended
+                final_miss = self.state.miss_distance if self.state.miss_distance != float('inf') else -1
                 await asyncio.shield(self._emit_event({
                     "type": "complete",
                     "run_id": self.state.run_id,
                     "ts": time.time(),
                     "result": "stopped",
-                    "final_miss_distance": self.state.miss_distance,
+                    "final_miss_distance": final_miss,
                     "sim_time": self.state.sim_time,
                     "ticks": self.state.tick,
                 }))
@@ -969,12 +1034,13 @@ class SimEngine:
             raise  # Re-raise so the caller knows it was cancelled
 
         # Emit final event
+        final_miss = self.state.miss_distance if self.state.miss_distance != float('inf') else -1
         await self._emit_event({
             "type": "complete",
             "run_id": self.state.run_id,
             "ts": time.time(),
             "result": self.state.result.value,
-            "final_miss_distance": self.state.miss_distance,
+            "final_miss_distance": final_miss,
             "sim_time": self.state.sim_time,
             "ticks": self.state.tick,
         })

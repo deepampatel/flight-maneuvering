@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { SimulationScene } from './components/Scene';
 import { ControlPanel } from './components/ControlPanel';
 import { HMTToast } from './components/HMTToast';
+import { LaunchEventToast } from './components/LaunchEventToast';
 import { useSimulation } from './hooks/useSimulation';
 import { useMissionPlanner } from './components/MissionPlanner';
 import './App.css';
@@ -77,6 +78,8 @@ function App() {
     rejectAction,
     setAuthorityLevel,
     configureHMT,
+    // Launchers
+    launchers,
   } = useSimulation();
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -91,11 +94,24 @@ function App() {
   const handleLaunch = async (options: Parameters<typeof startRun>[0]) => {
     // If we have planned entities, use them
     if (missionPlanner.plannedEntities.length > 0) {
-      const customEntities = missionPlanner.plannedEntities.map(e => ({
+      // Separate launchers from regular entities
+      const regularEntities = missionPlanner.plannedEntities.filter(e => e.type !== 'launcher');
+      const launcherEntities = missionPlanner.plannedEntities.filter(e => e.type === 'launcher');
+
+      const customEntities = regularEntities.map(e => ({
         id: e.id,
         type: e.type,
         position: e.position,
         velocity: e.velocity,
+      }));
+
+      // Format launchers for the backend
+      const customLaunchers = launcherEntities.map(e => ({
+        id: e.id,
+        position: e.position,
+        detection_range: e.launcherConfig?.detectionRange || 5000,
+        num_missiles: e.launcherConfig?.numMissiles || 4,
+        launch_mode: e.launcherConfig?.launchMode || 'auto',
       }));
 
       const customZones = missionPlanner.plannedZones.map(z => ({
@@ -109,6 +125,7 @@ function App() {
       await startRun({
         ...options,
         customEntities,
+        customLaunchers: customLaunchers.length > 0 ? customLaunchers : undefined,
         customZones: options.enableCooperative ? customZones : undefined,
       });
 
@@ -174,7 +191,7 @@ function App() {
             onRequestHandoff={requestHandoff}
             // Mission Planner
             plannerMode={missionPlanner.mode}
-            onSetPlannerMode={(mode: string) => missionPlanner.setMode(mode as 'view' | 'interceptor' | 'target' | 'zone')}
+            onSetPlannerMode={(mode: string) => missionPlanner.setMode(mode as 'view' | 'interceptor' | 'target' | 'launcher' | 'zone')}
             plannedEntities={missionPlanner.plannedEntities}
             plannedZones={missionPlanner.plannedZones}
             onClearPlanner={missionPlanner.clearAll}
@@ -210,6 +227,12 @@ function App() {
         enabled={isRunning}
       />
 
+      {/* Launch Event Toast - Command Center alerts for launcher events */}
+      <LaunchEventToast
+        launchers={launchers}
+        enabled={isRunning}
+      />
+
       <main className="app-main">
         <div className="scene-container">
           <SimulationScene
@@ -218,6 +241,7 @@ function App() {
             assignments={assignments}
             sensorTracks={sensorTracks}
             cooperativeState={cooperativeState}
+            launchers={launchers}
             // Mission Planner
             plannerMode={missionPlanner.mode}
             plannedEntities={missionPlanner.plannedEntities}
@@ -242,6 +266,89 @@ function App() {
         const selectedZone = missionPlanner.plannedZones.find(z => z.id === missionPlanner.selectedEntityId);
 
         if (selectedEntity) {
+          // Check if it's a launcher
+          if (selectedEntity.type === 'launcher') {
+            return (
+              <div className="property-panel launcher">
+                <div className="property-panel-header">
+                  <span className="entity-type-badge launcher">&#9651;</span>
+                  <span className="entity-id">{selectedEntity.id}</span>
+                  <button
+                    className="panel-close-btn"
+                    onClick={() => missionPlanner.selectEntity(null)}
+                    title="Close (Esc)"
+                  >
+                    &#10005;
+                  </button>
+                </div>
+
+                <div className="property-section">
+                  <div className="property-section-title">POSITION (m)</div>
+                  <div className="property-grid">
+                    <label>X</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedEntity.position.x)}
+                      onChange={(e) => missionPlanner.updateEntity(selectedEntity.id, {
+                        position: { ...selectedEntity.position, x: parseFloat(e.target.value) || 0 }
+                      })}
+                    />
+                    <label>Y</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedEntity.position.y)}
+                      onChange={(e) => missionPlanner.updateEntity(selectedEntity.id, {
+                        position: { ...selectedEntity.position, y: parseFloat(e.target.value) || 0 }
+                      })}
+                    />
+                  </div>
+                </div>
+
+                <div className="property-section">
+                  <div className="property-section-title">LAUNCHER CONFIG</div>
+                  <div className="property-grid">
+                    <label>Range (m)</label>
+                    <input
+                      type="number"
+                      value={selectedEntity.launcherConfig?.detectionRange || 5000}
+                      onChange={(e) => missionPlanner.updateEntity(selectedEntity.id, {
+                        launcherConfig: {
+                          ...selectedEntity.launcherConfig!,
+                          detectionRange: Math.max(1000, parseFloat(e.target.value) || 5000)
+                        }
+                      })}
+                    />
+                    <label>Missiles</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={selectedEntity.launcherConfig?.numMissiles || 4}
+                      onChange={(e) => missionPlanner.updateEntity(selectedEntity.id, {
+                        launcherConfig: {
+                          ...selectedEntity.launcherConfig!,
+                          numMissiles: Math.max(1, Math.min(20, parseInt(e.target.value) || 4))
+                        }
+                      })}
+                    />
+                  </div>
+                  <div className="property-summary">
+                    <span>Range: {((selectedEntity.launcherConfig?.detectionRange || 5000) / 1000).toFixed(1)} km</span>
+                  </div>
+                </div>
+
+                <div className="property-actions">
+                  <button
+                    className="property-action-btn delete"
+                    onClick={() => missionPlanner.removeEntity(selectedEntity.id)}
+                  >
+                    Delete Launcher
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
           const speed = Math.sqrt(
             selectedEntity.velocity.x ** 2 +
             selectedEntity.velocity.y ** 2 +
@@ -466,6 +573,14 @@ function App() {
                 <span className="btn-text">Target</span>
               </button>
               <button
+                className={`planner-btn launcher ${missionPlanner.mode === 'launcher' ? 'active' : ''}`}
+                onClick={() => missionPlanner.setMode('launcher')}
+                title="Place Launcher (L) - Click to place launch platform"
+              >
+                <span className="btn-icon">&#9651;</span>
+                <span className="btn-text">Launcher</span>
+              </button>
+              <button
                 className={`planner-btn zone ${missionPlanner.mode === 'zone' ? 'active' : ''}`}
                 onClick={() => missionPlanner.setMode('zone')}
                 title="Draw Zone (Z) - Click & drag to draw"
@@ -490,6 +605,10 @@ function App() {
               <div className="planner-count target">
                 <span className="count-icon">&#9679;</span>
                 <span className="count-value">{missionPlanner.plannedEntities.filter(e => e.type === 'target').length}</span>
+              </div>
+              <div className="planner-count launcher">
+                <span className="count-icon">&#9651;</span>
+                <span className="count-value">{missionPlanner.plannedEntities.filter(e => e.type === 'launcher').length}</span>
               </div>
               <div className="planner-count zone">
                 <span className="count-icon">&#9634;</span>

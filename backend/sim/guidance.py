@@ -195,6 +195,8 @@ def proportional_navigation(state: GuidanceState, params: GuidanceParams) -> Vec
     if distance < params.min_range:
         return Vec3.zero()
 
+    los_unit = los / distance
+
     # Compute LOS rate
     los_rate = compute_los_rate(state)
 
@@ -207,7 +209,20 @@ def proportional_navigation(state: GuidanceState, params: GuidanceParams) -> Vec
 
     # PN guidance law: a = N * Vc * LOS_rate
     # The LOS_rate is already a vector perpendicular to LOS
-    accel_cmd = los_rate * (params.nav_constant * closing_vel)
+    pn_accel = los_rate * (params.nav_constant * closing_vel)
+
+    # Add pursuit component along LOS to ensure we're actively closing
+    # This helps when the interceptor needs to accelerate toward the target
+    # Use remaining acceleration budget after PN steering
+    pn_mag = pn_accel.magnitude()
+    remaining_accel = state.interceptor_max_accel - pn_mag
+
+    if remaining_accel > 10.0:  # Only add if we have budget
+        # Add acceleration along LOS (toward target)
+        pursuit_accel = los_unit * remaining_accel * 0.5  # Use half of remaining
+        accel_cmd = pn_accel + pursuit_accel
+    else:
+        accel_cmd = pn_accel
 
     # Augmented PN: add target acceleration compensation
     if params.use_augmented and state.target_accel.magnitude() > 0.1:

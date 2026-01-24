@@ -19,7 +19,7 @@ import { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Line, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState } from '../types';
 import { MissionPlannerContent } from './MissionPlanner';
 import type { PlacementMode, PlannedEntity, PlannedZone } from './MissionPlanner';
 
@@ -126,6 +126,132 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false }: Target
           transparent
         />
       )}
+    </group>
+  );
+}
+
+/**
+ * Launcher visualization - A ground platform that launches interceptors
+ * Shows the platform, detection range circle, and missile count
+ */
+function Launcher({ launcher }: { launcher: LauncherState }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  // Convert sim coordinates to Three.js coordinates
+  const position: [number, number, number] = [
+    launcher.position.x * SCALE,
+    launcher.position.z * SCALE, // Z (up) becomes Y in Three.js
+    -launcher.position.y * SCALE, // Y (north) becomes -Z
+  ];
+
+  // Animate detection range ring
+  useFrame((state) => {
+    if (ringRef.current) {
+      ringRef.current.rotation.z = state.clock.elapsedTime * 0.2;
+    }
+  });
+
+  // Detection range in scene units
+  const detectionRange = launcher.detection_range * SCALE;
+
+  // Calculate fill percentage for missile display
+  const missilePercent = launcher.missiles_total > 0
+    ? launcher.missiles_remaining / launcher.missiles_total
+    : 0;
+
+  return (
+    <group position={position}>
+      {/* Platform base - hexagonal shape */}
+      <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.2, 0.25, 0.1, 6]} />
+        <meshStandardMaterial
+          color="#fbbf24"
+          emissive="#b45309"
+          emissiveIntensity={0.3}
+        />
+      </mesh>
+
+      {/* Launcher tube on top */}
+      <mesh position={[0, 0.12, 0]} rotation={[0.3, 0, 0]}>
+        <cylinderGeometry args={[0.05, 0.06, 0.15, 8]} />
+        <meshStandardMaterial
+          color="#78716c"
+          emissive="#44403c"
+          emissiveIntensity={0.2}
+        />
+      </mesh>
+
+      {/* Detection range ring - dashed circle on ground */}
+      <group rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <mesh ref={ringRef}>
+          <ringGeometry args={[detectionRange * 0.98, detectionRange, 64]} />
+          <meshBasicMaterial
+            color="#fbbf24"
+            transparent
+            opacity={0.15}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Outer ring line */}
+        <mesh>
+          <ringGeometry args={[detectionRange - 0.02, detectionRange, 64]} />
+          <meshBasicMaterial
+            color="#fbbf24"
+            transparent
+            opacity={0.4}
+          />
+        </mesh>
+      </group>
+
+      {/* Label */}
+      <Text
+        position={[0, 0.45, 0]}
+        fontSize={0.12}
+        color="#fbbf24"
+        anchorX="center"
+      >
+        {launcher.id}
+      </Text>
+
+      {/* Missile count indicator */}
+      <Text
+        position={[0, 0.32, 0]}
+        fontSize={0.08}
+        color={missilePercent > 0.5 ? '#22c55e' : missilePercent > 0 ? '#f59e0b' : '#ef4444'}
+        anchorX="center"
+      >
+        {`${launcher.missiles_remaining}/${launcher.missiles_total}`}
+      </Text>
+
+      {/* Detection range label at edge */}
+      <Text
+        position={[detectionRange, 0.1, 0]}
+        fontSize={0.08}
+        color="#fbbf24"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {`${(launcher.detection_range / 1000).toFixed(1)}km`}
+      </Text>
+
+      {/* Tracked target indicators - small dots for each tracked target */}
+      {launcher.tracked_targets && launcher.tracked_targets.map((track, idx) => {
+        const angle = (idx / Math.max(launcher.tracked_targets.length, 1)) * Math.PI * 2;
+        const indicatorPos: [number, number, number] = [
+          Math.cos(angle) * 0.35,
+          0.05,
+          Math.sin(angle) * 0.35,
+        ];
+        return (
+          <mesh key={track.target_id} position={indicatorPos}>
+            <sphereGeometry args={[0.03, 8, 8]} />
+            <meshBasicMaterial
+              color={track.assigned_interceptor ? '#22c55e' : '#ef4444'}
+            />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
@@ -846,9 +972,10 @@ interface SceneContentProps {
   currentWind?: Vec3 | null;
   sensorTracks?: SensorTrack[] | null;  // Phase 6: Track uncertainty visualization
   cooperativeState?: CooperativeState | null;  // Phase 6: Cooperative engagement
+  launchers?: LauncherState[] | null;  // Launch platforms
 }
 
-function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState }: SceneContentProps) {
+function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers }: SceneContentProps) {
   // Phase 5: Support multiple targets
   const targets = state?.entities.filter((e) => e.type === 'target') || [];
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
@@ -932,6 +1059,11 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
           colorIndex={idx}
           isIntercepted={interceptedTargetIds.has(target.id)}
         />
+      ))}
+
+      {/* All Launchers - Launch platforms */}
+      {launchers && launchers.map((launcher) => (
+        <Launcher key={launcher.id} launcher={launcher} />
       ))}
 
       {/* All Interceptors */}
@@ -1029,6 +1161,7 @@ interface SimulationSceneProps {
   assignments?: AssignmentResult | null;
   sensorTracks?: SensorTrack[] | null;  // Phase 6
   cooperativeState?: CooperativeState | null;  // Phase 6: Cooperative engagement
+  launchers?: LauncherState[] | null;  // Launch platforms
   // Mission Planner props
   plannerMode?: PlacementMode;
   plannedEntities?: PlannedEntity[];
@@ -1051,6 +1184,7 @@ export function SimulationScene({
   assignments,
   sensorTracks,
   cooperativeState,
+  launchers,
   // Mission Planner
   plannerMode = 'view',
   plannedEntities = [],
@@ -1168,6 +1302,7 @@ export function SimulationScene({
         currentWind={currentWind}
         sensorTracks={sensorTracks}
         cooperativeState={cooperativeState}
+        launchers={launchers}
       />
 
       {/* Mission Planner overlay */}

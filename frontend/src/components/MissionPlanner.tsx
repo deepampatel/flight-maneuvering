@@ -21,14 +21,20 @@ import * as THREE from 'three';
 const SCALE = 0.001; // 1 unit = 1km
 const INVERSE_SCALE = 1000; // Convert back to meters
 
-export type PlacementMode = 'view' | 'interceptor' | 'target' | 'zone';
+export type PlacementMode = 'view' | 'interceptor' | 'target' | 'launcher' | 'zone';
 
 export interface PlannedEntity {
   id: string;
-  type: 'interceptor' | 'target';
+  type: 'interceptor' | 'target' | 'launcher';
   position: { x: number; y: number; z: number }; // In meters
   velocity: { x: number; y: number; z: number }; // In m/s
   color: string;
+  // Launcher-specific properties
+  launcherConfig?: {
+    detectionRange: number;      // meters
+    numMissiles: number;
+    launchMode: 'auto' | 'manual';
+  };
 }
 
 export interface PlannedZone {
@@ -58,6 +64,7 @@ interface MissionPlannerProps {
 // Color palettes
 const INTERCEPTOR_COLORS = ['#3b82f6', '#22c55e', '#06b6d4', '#a855f7', '#f97316'];
 const TARGET_COLORS = ['#ef4444', '#f97316', '#dc2626', '#ea580c'];
+const LAUNCHER_COLORS = ['#fbbf24', '#f59e0b', '#d97706', '#b45309'];  // Amber/orange for launchers
 const ZONE_COLORS = ['#00ff00', '#00ffff', '#ff00ff', '#ffff00'];
 
 // Grid settings
@@ -426,6 +433,7 @@ function EntityMarker({
   ];
 
   const isInterceptor = entity.type === 'interceptor';
+  const isLauncher = entity.type === 'launcher';
 
   // Smooth hover animation
   useFrame(() => {
@@ -503,6 +511,7 @@ function EntityMarker({
       <mesh
         ref={markerRef}
         position={position}
+        rotation={isLauncher ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
@@ -512,6 +521,8 @@ function EntityMarker({
       >
         {isInterceptor ? (
           <coneGeometry args={[0.15, 0.4, 8]} />
+        ) : isLauncher ? (
+          <cylinderGeometry args={[0.2, 0.25, 0.1, 6]} />
         ) : (
           <sphereGeometry args={[0.18, 16, 16]} />
         )}
@@ -541,11 +552,44 @@ function EntityMarker({
         color="#94a3b8"
         anchorX="center"
       >
-        {isInterceptor ? 'INTERCEPTOR' : 'TARGET'}
+        {isInterceptor ? 'INTERCEPTOR' : isLauncher ? 'LAUNCHER' : 'TARGET'}
       </Text>
 
-      {/* Velocity vector arrow */}
-      {velocityMagnitude > 0 && (
+      {/* Launcher detection range circle */}
+      {isLauncher && entity.launcherConfig && (
+        <group rotation={[-Math.PI / 2, 0, 0]} position={[position[0], 0.01, position[2]]}>
+          {/* Detection range fill */}
+          <mesh>
+            <ringGeometry args={[
+              entity.launcherConfig.detectionRange * SCALE * 0.98,
+              entity.launcherConfig.detectionRange * SCALE,
+              64
+            ]} />
+            <meshBasicMaterial
+              color={entity.color}
+              transparent
+              opacity={isSelected ? 0.2 : 0.1}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Detection range border */}
+          <mesh>
+            <ringGeometry args={[
+              entity.launcherConfig.detectionRange * SCALE - 0.02,
+              entity.launcherConfig.detectionRange * SCALE,
+              64
+            ]} />
+            <meshBasicMaterial
+              color={entity.color}
+              transparent
+              opacity={isSelected ? 0.6 : 0.3}
+            />
+          </mesh>
+        </group>
+      )}
+
+      {/* Velocity vector arrow - not for launchers (they're stationary) */}
+      {!isLauncher && velocityMagnitude > 0 && (
         <>
           {/* Arrow line */}
           <Line
@@ -597,16 +641,18 @@ function EntityMarker({
             onHover={setPositionHandleHovered}
           />
 
-          {/* Velocity handle (at arrow tip) */}
-          <VelocityHandle
-            position={velocityEnd}
-            entityPosition={position}
-            onDrag={handleVelocityDrag}
-            onDragEnd={() => {}}
-            color="#ffff00"
-            isHovered={velocityHandleHovered}
-            onHover={setVelocityHandleHovered}
-          />
+          {/* Velocity handle (at arrow tip) - not for launchers */}
+          {!isLauncher && (
+            <VelocityHandle
+              position={velocityEnd}
+              entityPosition={position}
+              onDrag={handleVelocityDrag}
+              onDragEnd={() => {}}
+              color="#ffff00"
+              isHovered={velocityHandleHovered}
+              onHover={setVelocityHandleHovered}
+            />
+          )}
         </>
       )}
     </group>
@@ -1118,8 +1164,9 @@ export function MissionPlannerContent({
   }, [selectedEntityId, onRemoveEntity, onRemoveZone, onSelectEntity]);
 
   // Get color for new entity
-  const getNextColor = useCallback((type: 'interceptor' | 'target') => {
-    const colors = type === 'interceptor' ? INTERCEPTOR_COLORS : TARGET_COLORS;
+  const getNextColor = useCallback((type: 'interceptor' | 'target' | 'launcher') => {
+    const colors = type === 'interceptor' ? INTERCEPTOR_COLORS :
+                   type === 'launcher' ? LAUNCHER_COLORS : TARGET_COLORS;
     const count = plannedEntities.filter(e => e.type === type).length;
     return colors[count % colors.length];
   }, [plannedEntities]);
@@ -1143,7 +1190,7 @@ export function MissionPlannerContent({
     if (mode === 'zone') {
       setZoneStart(point);
       setZoneCurrent(point);
-    } else if (mode === 'interceptor' || mode === 'target') {
+    } else if (mode === 'interceptor' || mode === 'target' || mode === 'launcher') {
       setPlacementStart(point);
       setPlacementCurrent(null);
       setIsPlacing(true);
@@ -1187,7 +1234,7 @@ export function MissionPlannerContent({
 
     // Complete entity placement
     if (isPlacing && placementStart) {
-      const type = mode as 'interceptor' | 'target';
+      const type = mode as 'interceptor' | 'target' | 'launcher';
       const simPos = {
         x: snapToGrid
           ? snapToGridValue(placementStart.x, true) * INVERSE_SCALE
@@ -1195,15 +1242,17 @@ export function MissionPlannerContent({
         y: snapToGrid
           ? snapToGridValue(-placementStart.z, true) * INVERSE_SCALE
           : -placementStart.z * INVERSE_SCALE,
-        z: 600,
+        z: type === 'launcher' ? 0 : 600,  // Launchers on ground
       };
 
-      // Calculate velocity from drag
+      // Calculate velocity from drag (launchers are stationary)
       let velocity = type === 'interceptor'
         ? { x: 150, y: 0, z: 20 }  // Default interceptor velocity
+        : type === 'launcher'
+        ? { x: 0, y: 0, z: 0 }     // Launchers are stationary
         : { x: -100, y: 0, z: 0 }; // Default target velocity
 
-      if (placementCurrent) {
+      if (placementCurrent && type !== 'launcher') {
         const velScale = 0.005;
         velocity = {
           x: (placementCurrent.x - placementStart.x) / velScale,
@@ -1230,15 +1279,28 @@ export function MissionPlannerContent({
 
       const id = type === 'interceptor'
         ? `I${plannedEntities.filter(e => e.type === 'interceptor').length + 1}`
+        : type === 'launcher'
+        ? `B${plannedEntities.filter(e => e.type === 'launcher').length + 1}`
         : `T${plannedEntities.filter(e => e.type === 'target').length + 1}`;
 
-      onAddEntity({
+      const entity: PlannedEntity = {
         id,
         type,
         position: simPos,
         velocity,
         color: getNextColor(type),
-      });
+      };
+
+      // Add launcher-specific config
+      if (type === 'launcher') {
+        entity.launcherConfig = {
+          detectionRange: 5000,
+          numMissiles: 4,
+          launchMode: 'auto',
+        };
+      }
+
+      onAddEntity(entity);
 
       setPlacementStart(null);
       setPlacementCurrent(null);
@@ -1311,7 +1373,8 @@ export function MissionPlannerContent({
             showHandles={mode === 'view'}
             snapToGrid={snapToGrid}
           />
-          <TrajectoryPreview entity={entity} />
+          {/* Trajectory preview - not for launchers */}
+          {entity.type !== 'launcher' && <TrajectoryPreview entity={entity} />}
         </group>
       ))}
 
@@ -1339,6 +1402,7 @@ export function MissionPlannerContent({
           color={
             mode === 'interceptor' ? '#3b82f6' :
             mode === 'target' ? '#ef4444' :
+            mode === 'launcher' ? '#fbbf24' :
             '#00ff00'
           }
           anchorX="center"
@@ -1347,6 +1411,7 @@ export function MissionPlannerContent({
         >
           {mode === 'interceptor' ? 'CLICK & DRAG TO PLACE INTERCEPTOR' :
            mode === 'target' ? 'CLICK & DRAG TO PLACE TARGET' :
+           mode === 'launcher' ? 'CLICK TO PLACE LAUNCHER' :
            'CLICK & DRAG TO DRAW ZONE'}
         </Text>
       )}

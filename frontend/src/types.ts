@@ -254,6 +254,51 @@ export interface SimStateEvent {
     workload: WorkloadMetrics;
     trust: TrustMetrics;
   };
+  // Phase 8: Launchers
+  launchers?: LauncherState[];
+}
+
+// Phase 8: Launcher (Bogey) Types
+export interface LauncherState {
+  id: string;
+  type: 'launcher';
+  position: Vec3;
+  velocity: Vec3;
+  missiles_remaining: number;
+  missiles_total: number;
+  detection_range: number;
+  tracked_targets: {
+    target_id: string;
+    range: number;
+    bearing: number;
+    assigned_interceptor: string | null;
+  }[];
+  engaged_targets: string[];
+}
+
+// Launch Event Types - Command Center Alerts
+export type LaunchEventType =
+  | 'target_detected'
+  | 'missile_launched'
+  | 'magazine_depleted'
+  | 'intercept_success'
+  | 'intercept_miss'
+  | 'target_lost';
+
+export interface LaunchEvent {
+  id: string;
+  type: LaunchEventType;
+  timestamp: number;
+  launcher_id: string;
+  target_id?: string;
+  interceptor_id?: string;
+  message: string;
+  details?: {
+    range?: number;
+    bearing?: number;
+    missiles_remaining?: number;
+    miss_distance?: number;
+  };
 }
 
 // Phase 5: Sensor Types

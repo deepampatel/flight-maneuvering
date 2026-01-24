@@ -60,6 +60,8 @@ import type {
   DatalinkStatus,
   TerrainStatus,
   Phase7Status,
+  // Launchers
+  LauncherState,
 } from '../types';
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -80,6 +82,14 @@ interface PlannedZone {
   color: string;
 }
 
+interface PlannedLauncher {
+  id: string;
+  position: { x: number; y: number; z: number };
+  detection_range: number;
+  num_missiles: number;
+  launch_mode: string;
+}
+
 interface RunOptions {
   scenario: string;
   guidance: string;
@@ -98,6 +108,7 @@ interface RunOptions {
   // Mission Planner: Custom entities
   customEntities?: PlannedEntity[];
   customZones?: PlannedZone[];
+  customLaunchers?: PlannedLauncher[];
   // Phase 7: Swarm
   enableSwarm?: boolean;
   swarmFormation?: FormationType;
@@ -212,6 +223,8 @@ interface UseSimulationReturn {
   // Phase 7: Combined status
   phase7Status: Phase7Status | null;
   fetchPhase7Status: () => Promise<void>;
+  // Launchers
+  launchers: LauncherState[] | null;
 }
 
 export function useSimulation(): UseSimulationReturn {
@@ -256,6 +269,8 @@ export function useSimulation(): UseSimulationReturn {
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
   // Phase 7: Combined
   const [phase7Status, setPhase7Status] = useState<Phase7Status | null>(null);
+  // Launchers
+  const [launchers, setLaunchers] = useState<LauncherState[] | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
@@ -326,6 +341,10 @@ export function useSimulation(): UseSimulationReturn {
           // Phase 7: Extract HMT pending actions from state event
           if (data.hmt?.pending_actions) {
             setPendingActions(data.hmt.pending_actions);
+          }
+          // Extract launchers from state event
+          if (data.launchers) {
+            setLaunchers(data.launchers);
           }
         } else if (data.type === 'complete') {
           console.log('Simulation complete:', data.result);
@@ -398,6 +417,7 @@ export function useSimulation(): UseSimulationReturn {
         // Mission Planner: Custom entities
         custom_entities: options.customEntities,
         custom_zones: options.customZones,
+        custom_launchers: options.customLaunchers,
         // Phase 7: Swarm
         enable_swarm: options.enableSwarm || false,
         swarm_formation: options.swarmFormation,
@@ -1086,5 +1106,7 @@ export function useSimulation(): UseSimulationReturn {
     // Phase 7: Combined
     phase7Status,
     fetchPhase7Status,
+    // Launchers
+    launchers,
   };
 }

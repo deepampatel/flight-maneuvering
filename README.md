@@ -2,6 +2,33 @@
 
 A real-time air intercept simulation sandbox for learning guidance, control, and autonomy concepts.
 
+## Phase 8: Launch Platforms & Command Center UX ✓
+
+Building on Phase 7, this phase adds mobile launch platforms (bogeys) and command center visualization:
+
+- **Launch Platforms (Bogeys)**: Mobile missile launch systems
+  - Autonomous launch platforms with configurable detection range
+  - Magazine management (1-20 missiles per launcher)
+  - Auto-launch mode with target acquisition
+  - Lead prediction for optimal launch direction
+  - Detection range visualization rings
+  - Mission planner integration for placement
+- **Command Center Alerts**: Real-time event notification system
+  - Target acquisition alerts ("TGT ACQUIRED")
+  - Missile launch alerts ("FOX THREE")
+  - Magazine depletion warnings ("WINCHESTER")
+  - Track lost notifications
+  - Military-style callouts with visual effects
+  - Auto-dismissing toast notifications with progress bars
+- **Enhanced Guidance**: Improved proportional navigation
+  - Pursuit component added to PN for better closing
+  - Remaining acceleration budget utilized for LOS tracking
+  - Fixed HMT approval integration for seamless guidance
+- **WebSocket Event Streaming**: Real-time launcher state
+  - Tracked targets per launcher
+  - Missile counts and engaged targets
+  - Launch event detection in frontend
+
 ## Phase 7: Swarm Tactics, Terrain, Communications & Human-Machine Teaming ✓
 
 Building on Phase 6, this phase adds four major feature sets for advanced multi-agent scenarios:
@@ -395,7 +422,8 @@ air-dominance/
 │   │   ├── swarm.py        # Swarm tactics & formations (Phase 7)
 │   │   ├── terrain.py      # DEM & terrain masking (Phase 7)
 │   │   ├── datalink.py     # Communication modeling (Phase 7)
-│   │   └── hmt.py          # Human-machine teaming (Phase 7)
+│   │   ├── hmt.py          # Human-machine teaming (Phase 7)
+│   │   └── launcher.py     # Launch platforms/bogeys (Phase 8)
 │   ├── recordings/         # Saved simulation recordings
 │   └── server.py           # FastAPI + WebSocket server
 ├── frontend/
@@ -403,7 +431,9 @@ air-dominance/
 │       ├── components/
 │       │   ├── Scene.tsx        # Three.js 3D visualization + trails
 │       │   ├── ControlPanel.tsx # Mission control toolbar + HUD
-│       │   └── MissionPlanner.tsx # Interactive entity placement
+│       │   ├── MissionPlanner.tsx # Interactive entity placement
+│       │   ├── HMTToast.tsx       # Human-Machine Teaming approval UI
+│       │   └── LaunchEventToast.tsx # Command center event alerts
 │       ├── hooks/
 │       │   └── useSimulation.ts # WebSocket + API state management
 │       ├── types.ts             # TypeScript interfaces
@@ -474,9 +504,35 @@ air-dominance/
 | `/hmt/reject/{id}` | POST | Reject a pending action |
 | `/hmt/history` | GET | Get action history |
 | `/phase7/status` | GET | Get all Phase 7 subsystem statuses |
-| `/ws` | WebSocket | Real-time 50Hz state stream |
+| `/launchers` | GET | List all active launchers |
+| `/launchers/{id}` | GET | Get specific launcher status |
+| `/ws` | WebSocket | Real-time 50Hz state stream (includes launcher state) |
 
-## Coming Up: Phase 8
+### Launch Platform Events (via WebSocket)
+
+The WebSocket stream includes launcher state with each tick:
+```json
+{
+  "type": "state",
+  "launchers": [{
+    "id": "B1",
+    "position": {"x": 0, "y": 0, "z": 0},
+    "missiles_remaining": 3,
+    "missiles_total": 4,
+    "detection_range": 5000,
+    "tracked_targets": [{"target_id": "T1", "range": 3500, "bearing": 45}],
+    "engaged_targets": ["T1"]
+  }]
+}
+```
+
+The frontend `LaunchEventToast` component detects state changes and generates alerts:
+- New target in `tracked_targets` → "TGT ACQUIRED"
+- `missiles_remaining` decreases → "FOX THREE"
+- `missiles_remaining` reaches 0 → "WINCHESTER"
+- Target removed from `tracked_targets` → "TGT LOST"
+
+## Coming Up: Phase 9
 
 - **Multi-Domain Operations**: Air-ground-sea integration
   - Surface-to-air threats
@@ -494,3 +550,8 @@ air-dominance/
   - Guided tutorials
   - Challenge scenarios with scoring
   - Performance analytics dashboard
+- **Advanced Launch Platforms**: Extended bogey capabilities
+  - Mobile launch platforms with movement
+  - Salvo launch modes
+  - Reload and resupply mechanics
+  - Multi-launcher coordination

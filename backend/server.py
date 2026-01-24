@@ -141,6 +141,15 @@ class PlannedZoneModel(BaseModel):
     color: str = "#00ff00"
 
 
+class PlannedLauncherModel(BaseModel):
+    """Planned launcher/bogey from mission planner."""
+    id: str
+    position: Vec3Model
+    detection_range: float = 5000.0
+    num_missiles: int = 4
+    launch_mode: str = "auto"
+
+
 class RunConfig(BaseModel):
     """Request body for starting a run."""
     scenario: str = "head_on"
@@ -166,6 +175,7 @@ class RunConfig(BaseModel):
     # Mission Planner: Custom entities
     custom_entities: Optional[list[PlannedEntityModel]] = None
     custom_zones: Optional[list[PlannedZoneModel]] = None
+    custom_launchers: Optional[list[PlannedLauncherModel]] = None
     # Phase 7: Swarm
     enable_swarm: bool = False
     swarm_formation: Optional[str] = None
@@ -506,6 +516,16 @@ async def start_run(config: RunConfig):
 
     # Check if using custom entities from mission planner
     if config.custom_entities and len(config.custom_entities) > 0:
+        # Check validation: need either interceptors OR launchers
+        has_interceptors = any(e.type == 'interceptor' for e in config.custom_entities)
+        has_launchers = config.custom_launchers and len(config.custom_launchers) > 0
+        has_targets = any(e.type == 'target' for e in config.custom_entities)
+
+        if not has_targets:
+            raise HTTPException(status_code=400, detail="At least one target required")
+        if not has_interceptors and not has_launchers:
+            raise HTTPException(status_code=400, detail="At least one interceptor or launcher required")
+
         # Use custom entity setup
         current_engine.setup_custom_scenario(config.custom_entities)
     else:
@@ -538,6 +558,19 @@ async def start_run(config: RunConfig):
                 dimensions=Vec3(zone.dimensions.x, zone.dimensions.y, zone.dimensions.z),
                 color=zone.color,
             )
+
+    # Create custom launchers if provided
+    if config.custom_launchers:
+        from sim.launcher import create_launcher
+        for launcher_config in config.custom_launchers:
+            launcher = create_launcher(
+                position=Vec3(launcher_config.position.x, launcher_config.position.y, launcher_config.position.z),
+                launcher_id=launcher_config.id,
+                detection_range=launcher_config.detection_range,
+                num_missiles=launcher_config.num_missiles,
+                launch_mode=launcher_config.launch_mode,
+            )
+            current_engine.state.launchers.append(launcher)
 
     # Start simulation in background
     run_task = asyncio.create_task(current_engine.run())
