@@ -67,6 +67,44 @@ import type {
 const WS_URL = 'ws://localhost:8000/ws';
 const API_URL = 'http://localhost:8000';
 
+// Generic fetch helper to reduce repetitive code
+async function fetchApi<T>(
+  endpoint: string,
+  setter: (data: T) => void,
+  extractor?: (data: unknown) => T
+): Promise<void> {
+  try {
+    const response = await fetch(`${API_URL}${endpoint}`);
+    if (response.ok) {
+      const data = await response.json();
+      setter(extractor ? extractor(data) : data);
+    }
+  } catch {
+    // Silently fail if no active simulation
+  }
+}
+
+// Generic POST helper
+async function postApi(
+  endpoint: string,
+  body?: unknown,
+  onSuccess?: () => Promise<void>
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (response.ok && onSuccess) {
+      await onSuccess();
+    }
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 interface PlannedEntity {
   id: string;
   type: string;
@@ -534,31 +572,13 @@ export function useSimulation(): UseSimulationReturn {
     []
   );
 
-  // Fetch intercept geometry
-  const fetchInterceptGeometry = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/intercept-geometry`);
-      if (response.ok) {
-        const data = await response.json();
-        setInterceptGeometry(data.geometries);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchInterceptGeometry = useCallback(
+    () => fetchApi('/intercept-geometry', setInterceptGeometry, (d: any) => d.geometries), []
+  );
 
-  // Fetch threat assessment
-  const fetchThreatAssessment = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/threat-assessment`);
-      if (response.ok) {
-        const data = await response.json();
-        setThreatAssessment(data.assessments);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchThreatAssessment = useCallback(
+    () => fetchApi('/threat-assessment', setThreatAssessment, (d: any) => d.assessments), []
+  );
 
   // Start recording
   const startRecording = useCallback(async (): Promise<string> => {
@@ -667,18 +687,9 @@ export function useSimulation(): UseSimulationReturn {
     refreshRecordings();
   }, [refreshRecordings]);
 
-  // Fetch sensor detections
-  const fetchSensorDetections = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/sensor/detections`);
-      if (response.ok) {
-        const data = await response.json();
-        setSensorDetections(data.detections);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchSensorDetections = useCallback(
+    () => fetchApi('/sensor/detections', setSensorDetections, (d: any) => d.detections), []
+  );
 
   // Fetch WTA assignments
   const fetchAssignments = useCallback(async (algorithm: string = 'greedy_nearest') => {
@@ -693,333 +704,122 @@ export function useSimulation(): UseSimulationReturn {
     }
   }, []);
 
-  // Fetch cost matrix
-  const fetchCostMatrix = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/wta/cost-matrix`);
-      if (response.ok) {
-        const data = await response.json();
-        setCostMatrix(data);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchCostMatrix = useCallback(
+    () => fetchApi('/wta/cost-matrix', setCostMatrix), []
+  );
 
-  // Fetch environment state
-  const fetchEnvironmentState = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/environment/config`);
-      if (response.ok) {
-        const data = await response.json();
-        setEnvironmentState(data);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchEnvironmentState = useCallback(
+    () => fetchApi('/environment/config', setEnvironmentState), []
+  );
 
-  // Fetch sensor tracks with Kalman state
-  const fetchSensorTracks = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/sensor/tracks`);
-      if (response.ok) {
-        const data: SensorTracksResponse = await response.json();
-        // Flatten tracks from all sensors into a single list
-        const allTracks: SensorTrack[] = [];
-        for (const tracks of Object.values(data.tracks_by_sensor)) {
-          allTracks.push(...tracks);
-        }
-        setSensorTracks(allTracks);
+  const fetchSensorTracks = useCallback(
+    () => fetchApi('/sensor/tracks', setSensorTracks, (d: SensorTracksResponse) => {
+      const allTracks: SensorTrack[] = [];
+      for (const tracks of Object.values(d.tracks_by_sensor)) {
+        allTracks.push(...tracks);
       }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+      return allTracks;
+    }), []
+  );
 
-  // Fetch fused tracks
-  const fetchFusedTracks = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/sensor/fused-tracks`);
-      if (response.ok) {
-        const data: FusedTracksResponse = await response.json();
-        setFusedTracks(data.fused_tracks);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchFusedTracks = useCallback(
+    () => fetchApi('/sensor/fused-tracks', setFusedTracks, (d: FusedTracksResponse) => d.fused_tracks), []
+  );
 
-  // Fetch cooperative state
-  const fetchCooperativeState = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/cooperative/state`);
-      if (response.ok) {
-        const data: CooperativeState = await response.json();
-        setCooperativeState(data);
-      }
-    } catch (e) {
-      // Silently fail if no active simulation
-    }
-  }, []);
+  const fetchCooperativeState = useCallback(
+    () => fetchApi('/cooperative/state', setCooperativeState), []
+  );
 
-  // Create engagement zone
-  const createEngagementZone = useCallback(async (zone: EngagementZoneCreateRequest) => {
-    try {
-      const response = await fetch(`${API_URL}/cooperative/zones`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(zone),
-      });
-      if (response.ok) {
-        // Refresh cooperative state
-        await fetchCooperativeState();
-      }
-    } catch (e) {
-      console.error('Failed to create engagement zone:', e);
-    }
-  }, [fetchCooperativeState]);
+  const createEngagementZone = useCallback(
+    (zone: EngagementZoneCreateRequest) => postApi('/cooperative/zones', zone, fetchCooperativeState),
+    [fetchCooperativeState]
+  );
 
-  // Delete engagement zone
   const deleteEngagementZone = useCallback(async (zoneId: string) => {
     try {
-      const response = await fetch(`${API_URL}/cooperative/zones/${zoneId}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
-        // Refresh cooperative state
-        await fetchCooperativeState();
-      }
-    } catch (e) {
-      console.error('Failed to delete engagement zone:', e);
-    }
+      const response = await fetch(`${API_URL}/cooperative/zones/${zoneId}`, { method: 'DELETE' });
+      if (response.ok) await fetchCooperativeState();
+    } catch { /* ignore */ }
   }, [fetchCooperativeState]);
 
-  // Assign interceptor to zone
-  const assignInterceptorToZone = useCallback(async (interceptorId: string, zoneId: string) => {
-    try {
-      const response = await fetch(`${API_URL}/cooperative/zones/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          interceptor_id: interceptorId,
-          zone_id: zoneId,
-        }),
-      });
-      if (response.ok) {
-        // Refresh cooperative state
-        await fetchCooperativeState();
-      }
-    } catch (e) {
-      console.error('Failed to assign interceptor to zone:', e);
-    }
-  }, [fetchCooperativeState]);
+  const assignInterceptorToZone = useCallback(
+    (interceptorId: string, zoneId: string) =>
+      postApi('/cooperative/zones/assign', { interceptor_id: interceptorId, zone_id: zoneId }, fetchCooperativeState),
+    [fetchCooperativeState]
+  );
 
-  // Request handoff
-  const requestHandoff = useCallback(async (request: HandoffRequestCreate) => {
-    try {
-      const response = await fetch(`${API_URL}/cooperative/handoff/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      if (response.ok) {
-        // Refresh cooperative state
-        await fetchCooperativeState();
-      }
-    } catch (e) {
-      console.error('Failed to request handoff:', e);
-    }
-  }, [fetchCooperativeState]);
+  const requestHandoff = useCallback(
+    (request: HandoffRequestCreate) => postApi('/cooperative/handoff/request', request, fetchCooperativeState),
+    [fetchCooperativeState]
+  );
 
-  // Fetch ML status
-  const fetchMLStatus = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/ml/status`);
-      if (response.ok) {
-        const data: MLStatus = await response.json();
-        setMLStatus(data);
-      }
-    } catch (e) {
-      console.error('Failed to fetch ML status:', e);
-    }
-  }, []);
+  const fetchMLStatus = useCallback(
+    () => fetchApi('/ml/status', setMLStatus), []
+  );
 
-  // Fetch swarm status
-  const fetchSwarmStatus = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/swarm/status`);
-      if (response.ok) {
-        const data: SwarmStatus = await response.json();
-        setSwarmStatus(data);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const fetchSwarmStatus = useCallback(
+    () => fetchApi('/swarm/status', setSwarmStatus), []
+  );
 
-  // Configure swarm
-  const configureSwarm = useCallback(async (config: Partial<SwarmConfig>) => {
-    try {
-      const response = await fetch(`${API_URL}/swarm/configure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      if (response.ok) {
-        await fetchSwarmStatus();
-      }
-    } catch (e) {
-      console.error('Failed to configure swarm:', e);
-    }
-  }, [fetchSwarmStatus]);
+  const configureSwarm = useCallback(
+    (config: Partial<SwarmConfig>) => postApi('/swarm/configure', config, fetchSwarmStatus),
+    [fetchSwarmStatus]
+  );
 
-  // Set swarm formation
-  const setSwarmFormation = useCallback(async (formation: FormationType) => {
-    try {
-      const response = await fetch(`${API_URL}/swarm/formation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formation }),
-      });
-      if (response.ok) {
-        await fetchSwarmStatus();
-      }
-    } catch (e) {
-      console.error('Failed to set formation:', e);
-    }
-  }, [fetchSwarmStatus]);
+  const setSwarmFormation = useCallback(
+    (formation: FormationType) => postApi('/swarm/formation', { formation }, fetchSwarmStatus),
+    [fetchSwarmStatus]
+  );
 
-  // Fetch HMT status
-  const fetchHMTStatus = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/status`);
-      if (response.ok) {
-        const data: HMTStatus = await response.json();
-        setHMTStatus(data);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const fetchHMTStatus = useCallback(
+    () => fetchApi('/hmt/status', setHMTStatus), []
+  );
 
-  // Fetch pending actions
-  const fetchPendingActions = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/pending`);
-      if (response.ok) {
-        const data = await response.json();
-        setPendingActions(data.pending || []);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const fetchPendingActions = useCallback(
+    () => fetchApi('/hmt/pending', setPendingActions, (d: any) => d.pending || []), []
+  );
 
-  // Approve action
-  const approveAction = useCallback(async (actionId: string, reason?: string) => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/approve/${actionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
-      if (response.ok) {
+  const approveAction = useCallback(
+    async (actionId: string, reason?: string) => {
+      await postApi(`/hmt/approve/${actionId}`, { reason }, async () => {
         await fetchPendingActions();
         await fetchHMTStatus();
-      }
-    } catch (e) {
-      console.error('Failed to approve action:', e);
-    }
-  }, [fetchPendingActions, fetchHMTStatus]);
-
-  // Reject action
-  const rejectAction = useCallback(async (actionId: string, reason?: string) => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/reject/${actionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
       });
-      if (response.ok) {
+    },
+    [fetchPendingActions, fetchHMTStatus]
+  );
+
+  const rejectAction = useCallback(
+    async (actionId: string, reason?: string) => {
+      await postApi(`/hmt/reject/${actionId}`, { reason }, async () => {
         await fetchPendingActions();
         await fetchHMTStatus();
-      }
-    } catch (e) {
-      console.error('Failed to reject action:', e);
-    }
-  }, [fetchPendingActions, fetchHMTStatus]);
-
-  // Set authority level
-  const setAuthorityLevel = useCallback(async (level: AuthorityLevel) => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/authority`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authority_level: level }),
       });
-      if (response.ok) {
-        await fetchHMTStatus();
-      }
-    } catch (e) {
-      console.error('Failed to set authority level:', e);
-    }
-  }, [fetchHMTStatus]);
+    },
+    [fetchPendingActions, fetchHMTStatus]
+  );
 
-  // Configure HMT
-  const configureHMT = useCallback(async (config: Partial<HMTConfig>) => {
-    try {
-      const response = await fetch(`${API_URL}/hmt/configure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      if (response.ok) {
-        await fetchHMTStatus();
-      }
-    } catch (e) {
-      console.error('Failed to configure HMT:', e);
-    }
-  }, [fetchHMTStatus]);
+  const setAuthorityLevel = useCallback(
+    (level: AuthorityLevel) => postApi('/hmt/authority', { authority_level: level }, fetchHMTStatus),
+    [fetchHMTStatus]
+  );
 
-  // Fetch datalink status
-  const fetchDatalinkStatus = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/datalink/status`);
-      if (response.ok) {
-        const data: DatalinkStatus = await response.json();
-        setDatalinkStatus(data);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const configureHMT = useCallback(
+    (config: Partial<HMTConfig>) => postApi('/hmt/configure', config, fetchHMTStatus),
+    [fetchHMTStatus]
+  );
 
-  // Fetch terrain status
-  const fetchTerrainStatus = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/terrain/status`);
-      if (response.ok) {
-        const data: TerrainStatus = await response.json();
-        setTerrainStatus(data);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const fetchDatalinkStatus = useCallback(
+    () => fetchApi('/datalink/status', setDatalinkStatus), []
+  );
 
-  // Fetch combined Phase 7 status
-  const fetchPhase7Status = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/phase7/status`);
-      if (response.ok) {
-        const data: Phase7Status = await response.json();
-        setPhase7Status(data);
-      }
-    } catch (e) {
-      // Silently fail if not available
-    }
-  }, []);
+  const fetchTerrainStatus = useCallback(
+    () => fetchApi('/terrain/status', setTerrainStatus), []
+  );
+
+  const fetchPhase7Status = useCallback(
+    () => fetchApi('/phase7/status', setPhase7Status), []
+  );
 
   return {
     connected,
