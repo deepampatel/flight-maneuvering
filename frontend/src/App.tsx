@@ -141,7 +141,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-left">
-          <h1>AIR DOMINANCE</h1>
+          <h1>Intercept</h1>
           <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
             <span className="status-dot" />
             {connected ? 'ONLINE' : 'OFFLINE'}
