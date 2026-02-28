@@ -1,0 +1,13 @@
+services:
+  intercept:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - recordings:/app/backend/recordings
+    restart: unless-stopped
+
+volumes:
+  recordings:
