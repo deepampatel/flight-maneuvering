@@ -89,7 +89,7 @@ async function postApi(
   endpoint: string,
   body?: unknown,
   onSuccess?: () => Promise<void>
-): Promise<boolean> {
+): Promise<void> {
   try {
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
@@ -99,9 +99,8 @@ async function postApi(
     if (response.ok && onSuccess) {
       await onSuccess();
     }
-    return response.ok;
   } catch {
-    return false;
+    // Silently fail
   }
 }
 
@@ -713,17 +712,17 @@ export function useSimulation(): UseSimulationReturn {
   );
 
   const fetchSensorTracks = useCallback(
-    () => fetchApi('/sensor/tracks', setSensorTracks, (d: SensorTracksResponse) => {
+    () => fetchApi('/sensor/tracks', setSensorTracks, ((d: SensorTracksResponse) => {
       const allTracks: SensorTrack[] = [];
       for (const tracks of Object.values(d.tracks_by_sensor)) {
         allTracks.push(...tracks);
       }
       return allTracks;
-    }), []
+    }) as (data: unknown) => SensorTrack[]), []
   );
 
   const fetchFusedTracks = useCallback(
-    () => fetchApi('/sensor/fused-tracks', setFusedTracks, (d: FusedTracksResponse) => d.fused_tracks), []
+    () => fetchApi('/sensor/fused-tracks', setFusedTracks, ((d: FusedTracksResponse) => d.fused_tracks) as (data: unknown) => FusedTrack[]), []
   );
 
   const fetchCooperativeState = useCallback(

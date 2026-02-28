@@ -17,11 +17,18 @@
 
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, Line, Text } from '@react-three/drei';
+import { Grid, Line, Text, Stars } from '@react-three/drei';
+import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState } from '../types';
 import { MissionPlannerContent } from './MissionPlanner';
 import type { PlacementMode, PlannedEntity, PlannedZone } from './MissionPlanner';
+import { CameraController } from './CameraController';
+import type { CameraMode } from './CameraController';
+import { MissileMesh } from './models/MissileMesh';
+import { AircraftMesh } from './models/AircraftMesh';
+import { ExhaustTrail } from './effects/ExhaustTrail';
+import { Explosion } from './effects/Explosion';
 
 // Scale factor: sim uses meters, we scale down for visualization
 const SCALE = 0.001; // 1 unit = 1km
@@ -72,14 +79,17 @@ interface EntityProps {
 interface TargetProps extends EntityProps {
   colorIndex?: number;
   isIntercepted?: boolean;
+  isSelected?: boolean;
+  onClick?: () => void;
 }
 
 /**
  * Target visualization - a sphere with color based on index
  * Phase 5: Supports multiple targets with distinct colors
  */
-function Target({ entity, trail, colorIndex = 0, isIntercepted = false }: TargetProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
+function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelected = false, onClick }: TargetProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const selectionRef = useRef<THREE.Mesh>(null);
 
   // Get color for this target
   const color = TARGET_COLORS[colorIndex % TARGET_COLORS.length];
@@ -88,23 +98,46 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false }: Target
   // Convert sim coordinates to Three.js coordinates
   const position: [number, number, number] = [
     entity.position.x * SCALE,
-    entity.position.z * SCALE, // Z (up) becomes Y in Three.js
-    -entity.position.y * SCALE, // Y (north) becomes -Z
+    entity.position.z * SCALE,
+    -entity.position.y * SCALE,
   ];
+
+  // Animate selection ring and orient aircraft along velocity
+  useFrame((state) => {
+    if (groupRef.current) {
+      const vel = entity.velocity;
+      if (vel.x !== 0 || vel.y !== 0 || vel.z !== 0) {
+        _coneDir.set(vel.x, vel.z, -vel.y).normalize();
+        _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
+        _coneQuat.setFromRotationMatrix(_coneMatrix);
+        _coneQuat.multiply(_coneCorrection);
+        groupRef.current.quaternion.copy(_coneQuat);
+      }
+    }
+    if (selectionRef.current && isSelected) {
+      selectionRef.current.rotation.z = state.clock.elapsedTime * 1.5;
+    }
+  });
 
   return (
     <group>
-      {/* Target sphere */}
-      <mesh ref={meshRef} position={position}>
-        <sphereGeometry args={[0.15, 16, 16]} />
-        <meshStandardMaterial
+      {/* Aircraft mesh oriented along velocity */}
+      <group ref={groupRef} position={position} onClick={(e) => { e.stopPropagation(); onClick?.(); }}>
+        <AircraftMesh
           color={isIntercepted ? '#6b7280' : color}
           emissive={isIntercepted ? '#374151' : emissive}
-          emissiveIntensity={isIntercepted ? 0.1 : 0.3}
+          emissiveIntensity={isIntercepted ? 0.1 : isSelected ? 0.6 : 0.3}
           opacity={isIntercepted ? 0.5 : 1}
-          transparent={isIntercepted}
         />
-      </mesh>
+      </group>
+
+      {/* Selection ring */}
+      {isSelected && (
+        <mesh ref={selectionRef} position={position} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.25, 0.015, 8, 32]} />
+          <meshBasicMaterial color="#fbbf24" transparent opacity={0.8} />
+        </mesh>
+      )}
 
       {/* Label */}
       <Text
@@ -258,6 +291,8 @@ function Launcher({ launcher }: { launcher: LauncherState }) {
 
 interface InterceptorProps extends EntityProps {
   colorIndex?: number;
+  isSelected?: boolean;
+  onClick?: () => void;
 }
 
 // Reusable objects for cone rotation calculation (avoid GC pressure)
@@ -272,8 +307,9 @@ const _coneCorrection = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math
  * Interceptor visualization - a cone pointing in velocity direction
  * Supports multiple interceptors with distinct colors
  */
-function Interceptor({ entity, trail, colorIndex = 0 }: InterceptorProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
+function Interceptor({ entity, trail, colorIndex = 0, isSelected = false, onClick }: InterceptorProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const selectionRef = useRef<THREE.Mesh>(null);
 
   // Get color for this interceptor
   const color = INTERCEPTOR_COLORS[colorIndex % INTERCEPTOR_COLORS.length];
@@ -285,34 +321,47 @@ function Interceptor({ entity, trail, colorIndex = 0 }: InterceptorProps) {
     -entity.position.y * SCALE,
   ];
 
-  // Calculate rotation to point cone in velocity direction
-  // Optimized: reuses static objects instead of creating new ones each frame
-  useFrame(() => {
-    if (!meshRef.current) return;
+  // Velocity in scene coords for exhaust trail
+  const velocity: [number, number, number] = [
+    entity.velocity.x * SCALE,
+    entity.velocity.z * SCALE,
+    -entity.velocity.y * SCALE,
+  ];
 
-    const vel = entity.velocity;
-    if (vel.x === 0 && vel.y === 0 && vel.z === 0) return;
-
-    // Reuse direction vector (avoid allocation)
-    _coneDir.set(vel.x, vel.z, -vel.y).normalize();
-
-    // Point the cone in the velocity direction
-    _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
-    _coneQuat.setFromRotationMatrix(_coneMatrix);
-
-    // Cone points up by default, rotate to point forward
-    _coneQuat.multiply(_coneCorrection);
-
-    meshRef.current.quaternion.copy(_coneQuat);
+  // Calculate rotation to point missile in velocity direction + animate selection
+  useFrame((state) => {
+    if (groupRef.current) {
+      const vel = entity.velocity;
+      if (vel.x !== 0 || vel.y !== 0 || vel.z !== 0) {
+        _coneDir.set(vel.x, vel.z, -vel.y).normalize();
+        _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
+        _coneQuat.setFromRotationMatrix(_coneMatrix);
+        _coneQuat.multiply(_coneCorrection);
+        groupRef.current.quaternion.copy(_coneQuat);
+      }
+    }
+    if (selectionRef.current && isSelected) {
+      selectionRef.current.rotation.z = state.clock.elapsedTime * 1.5;
+    }
   });
 
   return (
     <group>
-      {/* Interceptor cone */}
-      <mesh ref={meshRef} position={position}>
-        <coneGeometry args={[0.1, 0.3, 8]} />
-        <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.3} />
-      </mesh>
+      {/* Missile mesh oriented along velocity */}
+      <group ref={groupRef} position={position} onClick={(e) => { e.stopPropagation(); onClick?.(); }}>
+        <MissileMesh color={color} emissive={emissive} emissiveIntensity={isSelected ? 0.6 : 0.3} />
+      </group>
+
+      {/* Exhaust trail particles */}
+      <ExhaustTrail position={position} velocity={velocity} color={color} />
+
+      {/* Selection ring */}
+      {isSelected && (
+        <mesh ref={selectionRef} position={position} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.22, 0.015, 8, 32]} />
+          <meshBasicMaterial color="#fbbf24" transparent opacity={0.8} />
+        </mesh>
+      )}
 
       {/* Label */}
       <Text
@@ -964,18 +1013,29 @@ function PersistentTrail({
   );
 }
 
+interface ExplosionData {
+  id: string;
+  position: [number, number, number];
+}
+
 interface SceneContentProps {
   state: SimStateEvent | null;
   trails: Map<string, THREE.Vector3[]>;
   interceptGeometry?: InterceptGeometry[] | null;
   assignments?: AssignmentResult | null;
   currentWind?: Vec3 | null;
-  sensorTracks?: SensorTrack[] | null;  // Track uncertainty visualization
-  cooperativeState?: CooperativeState | null;  // Cooperative engagement
-  launchers?: LauncherState[] | null;  // Launch platforms
+  sensorTracks?: SensorTrack[] | null;
+  cooperativeState?: CooperativeState | null;
+  launchers?: LauncherState[] | null;
+  cameraMode: CameraMode;
+  selectedEntityId: string | null;
+  onSelectEntity?: (id: string | null) => void;
+  replayProgress?: number;
+  explosions?: ExplosionData[];
+  onExplosionComplete?: (id: string) => void;
 }
 
-function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers }: SceneContentProps) {
+function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers, cameraMode, selectedEntityId, onSelectEntity, replayProgress, explosions, onExplosionComplete }: SceneContentProps) {
   // Support multiple targets
   const targets = state?.entities.filter((e) => e.type === 'target') || [];
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
@@ -1011,12 +1071,12 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
       <directionalLight position={[10, 10, 5]} intensity={1} />
       <directionalLight position={[-10, -10, -5]} intensity={0.3} />
 
-      {/* Camera controls - lets user rotate/zoom */}
-      <OrbitControls
-        makeDefault
-        minDistance={1}
-        maxDistance={50}
-        target={[2.5, 0.5, 0]} // Center on action area
+      {/* Camera controller - supports multiple view modes */}
+      <CameraController
+        mode={cameraMode}
+        entities={state?.entities || []}
+        selectedEntityId={selectedEntityId}
+        replayProgress={replayProgress}
       />
 
       {/* Ground grid - 1 unit = 1km */}
@@ -1050,7 +1110,7 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         entities={state?.entities || []}
       />
 
-      {/* All Targets - Phase 5 multi-target support */}
+      {/* All Targets */}
       {targets.map((target, idx) => (
         <Target
           key={target.id}
@@ -1058,6 +1118,8 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
           trail={trails.get(target.id) || []}
           colorIndex={idx}
           isIntercepted={interceptedTargetIds.has(target.id)}
+          isSelected={selectedEntityId === target.id}
+          onClick={() => onSelectEntity?.(selectedEntityId === target.id ? null : target.id)}
         />
       ))}
 
@@ -1073,6 +1135,8 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
           entity={interceptor}
           trail={trails.get(interceptor.id) || []}
           colorIndex={idx}
+          isSelected={selectedEntityId === interceptor.id}
+          onClick={() => onSelectEntity?.(selectedEntityId === interceptor.id ? null : interceptor.id)}
         />
       ))}
 
@@ -1151,6 +1215,23 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
           </group>
         );
       })}
+
+      {/* Explosions on intercept */}
+      {explosions && explosions.map(exp => (
+        <Explosion
+          key={exp.id}
+          position={exp.position}
+          onComplete={() => onExplosionComplete?.(exp.id)}
+        />
+      ))}
+
+      {/* Starfield background */}
+      <Stars radius={100} depth={50} count={2000} factor={3} saturation={0} fade speed={1} />
+
+      {/* Post-processing bloom for emissive glow */}
+      <EffectComposer>
+        <Bloom luminanceThreshold={0.6} luminanceSmoothing={0.4} intensity={0.5} />
+      </EffectComposer>
     </>
   );
 }
@@ -1159,9 +1240,14 @@ interface SimulationSceneProps {
   state: SimStateEvent | SimStateEventWithEnvironment | null;
   interceptGeometry?: InterceptGeometry[] | null;
   assignments?: AssignmentResult | null;
-  sensorTracks?: SensorTrack[] | null;  //
-  cooperativeState?: CooperativeState | null;  // Cooperative engagement
-  launchers?: LauncherState[] | null;  // Launch platforms
+  sensorTracks?: SensorTrack[] | null;
+  cooperativeState?: CooperativeState | null;
+  launchers?: LauncherState[] | null;
+  // Camera & selection
+  cameraMode?: CameraMode;
+  selectedEntityId?: string | null;
+  onSelectEntity?: (id: string | null) => void;
+  replayProgress?: number;
   // Mission Planner props
   plannerMode?: PlacementMode;
   plannedEntities?: PlannedEntity[];
@@ -1172,8 +1258,6 @@ interface SimulationSceneProps {
   onAddZone?: (zone: PlannedZone) => void;
   onUpdateZone?: (id: string, updates: Partial<PlannedZone>) => void;
   onRemoveZone?: (id: string) => void;
-  selectedEntityId?: string | null;
-  onSelectEntity?: (id: string | null) => void;
   showGrid?: boolean;
   snapToGrid?: boolean;
 }
@@ -1185,6 +1269,11 @@ export function SimulationScene({
   sensorTracks,
   cooperativeState,
   launchers,
+  // Camera & selection
+  cameraMode = 'free',
+  selectedEntityId = null,
+  onSelectEntity,
+  replayProgress,
   // Mission Planner
   plannerMode = 'view',
   plannedEntities = [],
@@ -1195,8 +1284,6 @@ export function SimulationScene({
   onAddZone,
   onUpdateZone,
   onRemoveZone,
-  selectedEntityId = null,
-  onSelectEntity,
   showGrid = false,
   snapToGrid = false,
 }: SimulationSceneProps) {
@@ -1213,6 +1300,49 @@ export function SimulationScene({
   const [trails, setTrails] = useState<Map<string, THREE.Vector3[]>>(new Map());
   // Track current run_id to know when to clear trails
   const currentRunIdRef = useRef<string | null>(null);
+
+  // Explosion tracking
+  const [explosions, setExplosions] = useState<ExplosionData[]>([]);
+  const prevInterceptedRef = useRef<Set<string>>(new Set());
+
+  // Detect new intercepts and spawn explosions
+  useEffect(() => {
+    if (!state?.intercepted_pairs) return;
+    const currentPairs = state.intercepted_pairs;
+    const newPairs = currentPairs.filter(pair => {
+      const key = `${pair[0]}-${pair[1]}`;
+      return !prevInterceptedRef.current.has(key);
+    });
+    if (newPairs.length > 0) {
+      const newExplosions: ExplosionData[] = newPairs.map(pair => {
+        // Find the interceptor position for the explosion
+        const interceptor = state.entities.find(e => e.id === pair[0]);
+        const target = state.entities.find(e => e.id === pair[1]);
+        const entity = interceptor || target;
+        const pos: [number, number, number] = entity
+          ? [entity.position.x * SCALE, entity.position.z * SCALE, -entity.position.y * SCALE]
+          : [0, 0, 0];
+        return { id: `exp-${pair[0]}-${pair[1]}-${Date.now()}`, position: pos };
+      });
+      setExplosions(prev => [...prev, ...newExplosions]);
+      // Update tracked pairs
+      const updated = new Set(prevInterceptedRef.current);
+      newPairs.forEach(pair => updated.add(`${pair[0]}-${pair[1]}`));
+      prevInterceptedRef.current = updated;
+    }
+  }, [state?.intercepted_pairs, state?.entities]);
+
+  // Clear explosion tracking on new run
+  useEffect(() => {
+    if (state?.run_id && state.run_id !== currentRunIdRef.current) {
+      prevInterceptedRef.current = new Set();
+      setExplosions([]);
+    }
+  }, [state?.run_id]);
+
+  const handleExplosionComplete = (id: string) => {
+    setExplosions(prev => prev.filter(e => e.id !== id));
+  };
 
   // Update trails when state changes
   useEffect(() => {
@@ -1292,7 +1422,7 @@ export function SimulationScene({
         near: 0.1,
         far: 1000,
       }}
-      style={{ background: '#111827' }}
+      style={{ background: '#0a0e17' }}
     >
       <SceneContent
         state={state}
@@ -1303,6 +1433,12 @@ export function SimulationScene({
         sensorTracks={sensorTracks}
         cooperativeState={cooperativeState}
         launchers={launchers}
+        cameraMode={cameraMode}
+        selectedEntityId={selectedEntityId}
+        onSelectEntity={onSelectEntity}
+        replayProgress={replayProgress}
+        explosions={explosions}
+        onExplosionComplete={handleExplosionComplete}
       />
 
       {/* Mission Planner overlay */}

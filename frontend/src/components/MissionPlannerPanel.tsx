@@ -65,7 +65,7 @@ export function MissionPlannerPanel({
   onSelectEntity,
   onUpdateEntity,
   onRemoveEntity,
-  onUpdateZone,
+  onUpdateZone: _,
   onRemoveZone,
   onClearAll,
   showGrid,
