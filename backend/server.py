@@ -351,7 +351,7 @@ app.add_middleware(
 # REST Endpoints
 # ============================================================
 
-@app.get("/")
+@app.get("/api/status")
 async def root():
     return {
         "name": "Air Dominance Simulation",
