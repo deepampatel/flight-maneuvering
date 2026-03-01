@@ -921,3 +921,71 @@ export interface Phase7Status {
     enabled: boolean;
   };
 }
+
+
+// ============================================================
+// Scenario Builder types
+// ============================================================
+
+export interface BuilderBatteryConfig {
+  id: string;
+  name: string;
+  tier: string;
+  position: Vec3;
+  radar_range: number;
+  radar_sector: number;
+  num_launchers: number;
+  missiles_per_launcher: number;
+  max_simultaneous: number;
+  min_range: number;
+  max_range: number;
+  launch_speed: number;
+  launch_elevation: number;
+  min_altitude: number;
+  protected_area_ids: string[];
+}
+
+export interface BuilderWaveConfig {
+  id: string;
+  delay: number;
+  threat_type: string;
+  count: number;
+  spawn_bearing: number;
+  spawn_range: number;
+  spawn_altitude: number;
+  spacing: number;
+  salvo_interval: number;
+  decoy_fraction: number;
+}
+
+export interface BuilderProtectedArea {
+  id: string;
+  name: string;
+  center: Vec3;
+  radius: number;
+  priority: number;
+}
+
+export interface ScenarioBuilderState {
+  batteries: BuilderBatteryConfig[];
+  waves: BuilderWaveConfig[];
+  protectedAreas: BuilderProtectedArea[];
+  guidance: string;
+  navConstant: number;
+  evasion: string;
+  wtaAlgorithm: string;
+  killRadius: number;
+  numInterceptors: number;
+  numTargets: number;
+  windSpeed: number;
+  windDirection: number;
+  windGusts: number;
+  enableDrag: boolean;
+  enableTerrain: boolean;
+  enableDatalink: boolean;
+  enableCooperative: boolean;
+  enableSwarm: boolean;
+  enableHmt: boolean;
+  hmtAuthorityLevel: string;
+  maxTime: number;
+}

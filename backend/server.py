@@ -150,6 +150,47 @@ class PlannedLauncherModel(BaseModel):
     launch_mode: str = "auto"
 
 
+class BatteryConfigModel(BaseModel):
+    """Battery configuration from the Scenario Builder."""
+    id: str
+    name: str = "Battery"
+    tier: str = "iron_dome"  # iron_dome, davids_sling, arrow
+    position: Vec3Model
+    radar_range: float = 70000.0
+    radar_sector: float = 360.0
+    num_launchers: int = 3
+    missiles_per_launcher: int = 20
+    max_simultaneous: int = 6
+    min_range: float = 4000.0
+    max_range: float = 70000.0
+    launch_speed: float = 250.0
+    launch_elevation: float = 80.0
+    min_altitude: float = 100.0
+    protected_area_ids: list[str] = []
+
+
+class WaveConfigModel(BaseModel):
+    """Wave configuration from the Scenario Builder."""
+    delay: float = 0.0
+    threat_type: str = "qassam"
+    count: int = 3
+    spawn_bearing: float = 0.0
+    spawn_range: float = 15000.0
+    spawn_altitude: float = 2000.0
+    spacing: float = 300.0
+    salvo_interval: float = 0.5
+    decoy_fraction: float = 0.0
+
+
+class ProtectedAreaModel(BaseModel):
+    """Protected area from the Scenario Builder."""
+    id: str
+    name: str = "City"
+    center: Vec3Model
+    radius: float = 2000.0
+    priority: int = 5
+
+
 class RunConfig(BaseModel):
     """Request body for starting a run."""
     scenario: str = "head_on"
@@ -176,6 +217,10 @@ class RunConfig(BaseModel):
     custom_entities: Optional[list[PlannedEntityModel]] = None
     custom_zones: Optional[list[PlannedZoneModel]] = None
     custom_launchers: Optional[list[PlannedLauncherModel]] = None
+    # Scenario Builder: Custom batteries, waves, protected areas
+    custom_batteries: Optional[list[BatteryConfigModel]] = None
+    custom_waves: Optional[list[WaveConfigModel]] = None
+    custom_protected_areas: Optional[list[ProtectedAreaModel]] = None
     # Swarm coordination
     enable_swarm: bool = False
     swarm_formation: Optional[str] = None
@@ -358,6 +403,86 @@ async def root():
         "name": "Air Dominance Simulation",
         "version": "0.1.0",
         "status": "ready",
+    }
+
+
+@app.get("/api/catalog")
+async def get_catalog():
+    """Return all configurable options for the Scenario Builder UI."""
+    return {
+        "tiers": {
+            "iron_dome": {
+                "name": "Iron Dome",
+                "interceptor": "tamir",
+                "min_range": 4000,
+                "max_range": 70000,
+                "defaults": {
+                    "radar_range": 70000,
+                    "radar_sector": 360,
+                    "num_launchers": 3,
+                    "missiles_per_launcher": 20,
+                    "max_simultaneous": 6,
+                    "launch_speed": 250,
+                    "launch_elevation": 80,
+                    "min_altitude": 100,
+                },
+            },
+            "davids_sling": {
+                "name": "David's Sling",
+                "interceptor": "stunner",
+                "min_range": 40000,
+                "max_range": 300000,
+                "defaults": {
+                    "radar_range": 300000,
+                    "radar_sector": 360,
+                    "num_launchers": 4,
+                    "missiles_per_launcher": 12,
+                    "max_simultaneous": 4,
+                    "launch_speed": 800,
+                    "launch_elevation": 85,
+                    "min_altitude": 500,
+                },
+            },
+            "arrow": {
+                "name": "Arrow",
+                "interceptor": "arrow_3",
+                "min_range": 100000,
+                "max_range": 2400000,
+                "defaults": {
+                    "radar_range": 2400000,
+                    "radar_sector": 120,
+                    "num_launchers": 6,
+                    "missiles_per_launcher": 4,
+                    "max_simultaneous": 2,
+                    "launch_speed": 2500,
+                    "launch_elevation": 89,
+                    "min_altitude": 10000,
+                },
+            },
+        },
+        "threat_types": {
+            "qassam": {"name": "Qassam", "speed": 200, "altitude": 2000, "category": "short_range"},
+            "grad": {"name": "Grad", "speed": 300, "altitude": 3000, "category": "medium_range"},
+            "cruise_missile": {"name": "Cruise Missile", "speed": 250, "altitude": 500, "category": "guided"},
+        },
+        "guidance_laws": [
+            {"id": "pure_pursuit", "name": "Pure Pursuit"},
+            {"id": "proportional_nav", "name": "Proportional Nav"},
+            {"id": "augmented_pn", "name": "Augmented PN"},
+        ],
+        "evasion_types": [
+            {"id": "none", "name": "None"},
+            {"id": "constant_turn", "name": "Constant Turn"},
+            {"id": "weave", "name": "Weave"},
+            {"id": "barrel_roll", "name": "Barrel Roll"},
+            {"id": "random_jink", "name": "Random Jink"},
+        ],
+        "wta_algorithms": [
+            {"id": "hungarian", "name": "Hungarian (Optimal)"},
+            {"id": "greedy_nearest", "name": "Greedy Nearest"},
+            {"id": "greedy_threat", "name": "Greedy Threat"},
+            {"id": "round_robin", "name": "Round Robin"},
+        ],
     }
 
 
@@ -586,6 +711,84 @@ async def start_run(config: RunConfig):
                 launch_mode=launcher_config.launch_mode,
             )
             current_engine.state.launchers.append(launcher)
+
+    # Scenario Builder: custom batteries
+    if config.custom_batteries:
+        from sim.battery import BatteryConfig
+        from sim.ipp import ProtectedArea as IPPArea
+        custom_battery_configs = []
+        for bc in config.custom_batteries:
+            # Resolve protected areas linked to this battery
+            linked_areas = []
+            if config.custom_protected_areas and bc.protected_area_ids:
+                for area_id in bc.protected_area_ids:
+                    for pa in config.custom_protected_areas:
+                        if pa.id == area_id:
+                            linked_areas.append(IPPArea(
+                                name=pa.name,
+                                center=Vec3(pa.center.x, pa.center.y, pa.center.z),
+                                radius=pa.radius,
+                                priority=pa.priority,
+                            ))
+            custom_battery_configs.append(BatteryConfig(
+                position=Vec3(bc.position.x, bc.position.y, bc.position.z),
+                name=bc.name,
+                tier=bc.tier,
+                interceptor_type={"iron_dome": "tamir", "davids_sling": "stunner", "arrow": "arrow_3"}.get(bc.tier, "tamir"),
+                radar_range=bc.radar_range,
+                radar_sector=bc.radar_sector,
+                num_launchers=bc.num_launchers,
+                missiles_per_launcher=bc.missiles_per_launcher,
+                max_simultaneous=bc.max_simultaneous,
+                min_range=bc.min_range,
+                max_range=bc.max_range,
+                launch_speed=bc.launch_speed,
+                launch_elevation=bc.launch_elevation,
+                min_altitude=bc.min_altitude,
+                protected_areas=linked_areas,
+            ))
+        current_engine.battery_configs = custom_battery_configs
+
+    # Scenario Builder: custom protected areas (also add to engine directly)
+    if config.custom_protected_areas:
+        from sim.ipp import ProtectedArea as IPPArea
+        for pa in config.custom_protected_areas:
+            area = IPPArea(
+                name=pa.name,
+                center=Vec3(pa.center.x, pa.center.y, pa.center.z),
+                radius=pa.radius,
+                priority=pa.priority,
+            )
+            current_engine.protected_areas.append(area)
+
+    # Scenario Builder: custom waves
+    if config.custom_waves:
+        import math
+        from sim.waves import ThreatWave
+        custom_wave_list = []
+        for i, wc in enumerate(config.custom_waves):
+            bearing_rad = math.radians(wc.spawn_bearing)
+            spawn_x = wc.spawn_range * math.sin(bearing_rad)
+            spawn_y = wc.spawn_range * math.cos(bearing_rad)
+            # Velocity points toward origin (the defended area)
+            speed = {"qassam": 200.0, "grad": 300.0, "cruise_missile": 250.0}.get(wc.threat_type, 200.0)
+            dist = math.sqrt(spawn_x**2 + spawn_y**2) or 1.0
+            vx = -speed * spawn_x / dist
+            vy = -speed * spawn_y / dist
+            vz = -speed * 0.3  # descending
+            custom_wave_list.append(ThreatWave(
+                wave_id=i + 1,
+                spawn_time=wc.delay,
+                threat_type=wc.threat_type,
+                count=wc.count,
+                spacing=wc.spacing,
+                start_position=Vec3(spawn_x, spawn_y, wc.spawn_altitude),
+                velocity=Vec3(vx, vy, vz),
+                salvo_interval=wc.salvo_interval,
+            ))
+        current_engine.wave_configs = custom_wave_list
+        if any(wc.decoy_fraction > 0 for wc in config.custom_waves):
+            current_engine.enable_decoys = True
 
     # Start simulation in background
     run_task = asyncio.create_task(current_engine.run())

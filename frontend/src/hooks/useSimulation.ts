@@ -157,6 +157,12 @@ interface RunOptions {
   enableDatalink?: boolean;
   // Terrain
   enableTerrain?: boolean;
+  // Scenario Builder: Custom batteries, waves, protected areas
+  customBatteries?: unknown[];
+  customWaves?: unknown[];
+  customProtectedAreas?: unknown[];
+  killRadius?: number;
+  maxTime?: number;
 }
 
 interface MonteCarloOptions {
@@ -466,6 +472,12 @@ export function useSimulation(): UseSimulationReturn {
         enable_datalink: options.enableDatalink || false,
         // Terrain
         enable_terrain: options.enableTerrain || false,
+        // Scenario Builder: Custom batteries, waves, protected areas
+        custom_batteries: options.customBatteries,
+        custom_waves: options.customWaves,
+        custom_protected_areas: options.customProtectedAreas,
+        kill_radius: options.killRadius,
+        max_time: options.maxTime,
       }),
     });
 

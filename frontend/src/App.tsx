@@ -27,8 +27,10 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { RadarSweep } from './components/RadarSweep';
 import { EngagementTimeline } from './components/EngagementTimeline';
 import { LayerDiagram } from './components/LayerDiagram';
+import { ScenarioBuilder } from './components/ScenarioBuilder';
 import { NARRATIVE_SCENARIOS, calculateScore } from './data/scenarios';
 import type { NarrativeScenario } from './data/scenarios';
+import type { ScenarioBuilderState } from './types';
 import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -105,8 +107,11 @@ function App() {
   } = useSimulation();
 
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(true);
   const [cameraMode, setCameraMode] = useState<CameraMode>('free');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [showRadar, setShowRadar] = useState(false);
+  const [showLayers, setShowLayers] = useState(false);
 
   // Audio system
   const audio = useAudio();
@@ -266,6 +271,80 @@ function App() {
     }
   };
 
+  // Scenario Builder launch handler
+  const handleBuilderLaunch = useCallback(async (builderState: ScenarioBuilderState, presetScenario: string | null) => {
+    audio.playLaunch();
+
+    const customBatteries = builderState.batteries.length > 0
+      ? builderState.batteries.map(b => ({
+          id: b.id,
+          name: b.name,
+          tier: b.tier,
+          position: b.position,
+          radar_range: b.radar_range,
+          radar_sector: b.radar_sector,
+          num_launchers: b.num_launchers,
+          missiles_per_launcher: b.missiles_per_launcher,
+          max_simultaneous: b.max_simultaneous,
+          min_range: b.min_range,
+          max_range: b.max_range,
+          launch_speed: b.launch_speed,
+          launch_elevation: b.launch_elevation,
+          min_altitude: b.min_altitude,
+          protected_area_ids: b.protected_area_ids,
+        }))
+      : undefined;
+
+    const customWaves = builderState.waves.length > 0
+      ? builderState.waves.map(w => ({
+          delay: w.delay,
+          threat_type: w.threat_type,
+          count: w.count,
+          spawn_bearing: w.spawn_bearing,
+          spawn_range: w.spawn_range,
+          spawn_altitude: w.spawn_altitude,
+          spacing: w.spacing,
+          salvo_interval: w.salvo_interval,
+          decoy_fraction: w.decoy_fraction,
+        }))
+      : undefined;
+
+    const customProtectedAreas = builderState.protectedAreas.length > 0
+      ? builderState.protectedAreas.map(a => ({
+          id: a.id,
+          name: a.name,
+          center: a.center,
+          radius: a.radius,
+          priority: a.priority,
+        }))
+      : undefined;
+
+    await startRun({
+      scenario: presetScenario || 'head_on',
+      guidance: builderState.guidance,
+      navConstant: builderState.navConstant,
+      evasion: builderState.evasion,
+      numInterceptors: builderState.numInterceptors,
+      numTargets: builderState.numTargets,
+      wtaAlgorithm: builderState.wtaAlgorithm,
+      killRadius: builderState.killRadius,
+      windSpeed: builderState.windSpeed,
+      windDirection: builderState.windDirection,
+      windGusts: builderState.windGusts,
+      enableDrag: builderState.enableDrag,
+      enableTerrain: builderState.enableTerrain,
+      enableDatalink: builderState.enableDatalink,
+      enableCooperative: builderState.enableCooperative,
+      enableSwarm: builderState.enableSwarm,
+      enableHmt: builderState.enableHmt,
+      hmtAuthorityLevel: builderState.hmtAuthorityLevel as 'full_auto' | 'human_on_loop' | 'human_in_loop' | 'manual',
+      maxTime: builderState.maxTime,
+      customBatteries,
+      customWaves,
+      customProtectedAreas,
+    });
+  }, [startRun, audio]);
+
   // Replay theater handlers
   const handleReplaySeek = useCallback((tick: number) => {
     seekReplay?.(tick);
@@ -346,28 +425,10 @@ function App() {
         <div className="header-left">
           <div className="header-brand">
             <h1>Intercept</h1>
-            <span className="header-subtitle">AIR DEFENSE COMMAND</span>
-          </div>
-          <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
-            <span className="status-dot" />
-            {connected ? 'ONLINE' : 'OFFLINE'}
+            <span className="header-subtitle">Air Defense Simulation</span>
           </div>
         </div>
         <div className="header-center">
-          {/* Scenario quick-select buttons */}
-          <div className="scenario-buttons">
-            {NARRATIVE_SCENARIOS.map(s => (
-              <button
-                key={s.id}
-                className={`scenario-btn scenario-${s.difficulty.toLowerCase()} ${activeScenario?.id === s.id ? 'active' : ''}`}
-                onClick={() => handleSelectScenario(s)}
-                title={`${s.name} - ${s.difficulty}`}
-                disabled={isRunning}
-              >
-                {s.codename.split(' ')[0]}
-              </button>
-            ))}
-          </div>
           <ControlPanel
             connected={connected}
             state={state}
@@ -438,6 +499,13 @@ function App() {
             onConfigureHMT={configureHMT}
           />
         </div>
+        <div className="header-right">
+          <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
+            <span className="status-dot" />
+            {connected ? 'Online' : 'Offline'}
+          </div>
+          <span className="header-version">v2.0</span>
+        </div>
       </header>
 
       <StatusBar
@@ -446,6 +514,18 @@ function App() {
         isRecording={isRecording}
         muted={audio.muted}
         onToggleMute={audio.toggleMute}
+      />
+
+      {/* Scenario Builder Drawer */}
+      <ScenarioBuilder
+        open={builderOpen}
+        onToggle={() => setBuilderOpen(prev => !prev)}
+        isRunning={isRunning}
+        connected={connected}
+        isRecording={isRecording}
+        onLaunch={handleBuilderLaunch}
+        onStop={stopRun}
+        onToggleRecording={() => isRecording ? stopRecording() : startRecording()}
       />
 
       {/* HMT Toast - Floating notification for pending actions */}
@@ -497,11 +577,31 @@ function App() {
             interceptGeometry={firstGeometry}
           />
 
-          {/* Radar PPI overlay — top-left picture-in-picture */}
-          {isRunning && <RadarSweep state={state} />}
+          {/* Radar PPI overlay — togglable */}
+          {isRunning && showRadar && <RadarSweep state={state} />}
 
-          {/* Layer Diagram — top-right, shown only for multi-layer scenarios */}
-          {isRunning && <LayerDiagram state={state} />}
+          {/* Layer Diagram — togglable */}
+          {isRunning && showLayers && <LayerDiagram state={state} />}
+
+          {/* Overlay toggles — bottom-right of scene */}
+          {isRunning && (
+            <div className="scene-overlay-toggles">
+              <button
+                className={`overlay-toggle-btn ${showRadar ? 'active' : ''}`}
+                onClick={() => setShowRadar(r => !r)}
+                title="Toggle Radar PPI"
+              >
+                Radar
+              </button>
+              <button
+                className={`overlay-toggle-btn ${showLayers ? 'active' : ''}`}
+                onClick={() => setShowLayers(l => !l)}
+                title="Toggle Layer Diagram"
+              >
+                Layers
+              </button>
+            </div>
+          )}
 
           {/* Camera mode selector */}
           {!isReplayActive && (
