@@ -537,10 +537,18 @@ async def start_run(config: RunConfig):
         threat_type = scenario.get("threat_type", None)
         interceptor_type = scenario.get("interceptor_type", None)
         battery_configs = scenario.get("batteries", None)
+        wave_configs = scenario.get("waves", None)
+        enable_decoys = scenario.get("enable_decoys", False)
 
         # Pass battery configs to engine before setup
         if battery_configs:
             current_engine.battery_configs = battery_configs
+
+        # Pass wave configs to engine before setup (Phase 6)
+        if wave_configs:
+            current_engine.wave_configs = wave_configs
+        if enable_decoys:
+            current_engine.enable_decoys = True
 
         current_engine.setup_scenario(
             target_start=scenario["target_start"],

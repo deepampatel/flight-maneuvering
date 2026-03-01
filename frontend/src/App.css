@@ -722,6 +722,28 @@ body {
   display: contents;
 }
 
+/* Wave status panel (Phase 6) */
+.wave-panel {
+  border-color: #a855f7;
+}
+.wave-panel .hud-title {
+  color: #a855f7;
+}
+
+/* Engagement stats panel (Phase 6) */
+.stats-panel {
+  border-color: #60a5fa;
+}
+.stats-panel .hud-title {
+  color: #60a5fa;
+}
+
+/* Threat board (Phase 6) */
+.threat-board {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* Replay panel */
 .replay-progress {
   font-size: 0.7rem;

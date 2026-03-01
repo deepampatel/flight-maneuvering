@@ -246,6 +246,58 @@ export function MissionStatusHUD({
         </div>
       )}
 
+      {/* Wave Status (Phase 6) */}
+      {state?.wave_info && (
+        <div className="hud-panel wave-panel">
+          <div className="hud-title">WAVES</div>
+          <div className="hud-content">
+            <div className="hud-row">
+              <span className="hud-label">SPAWN</span>
+              <span className="hud-value">{state.wave_info.spawned}/{state.wave_info.total_threats}</span>
+            </div>
+            <div className="hud-row">
+              <span className="hud-label">REMAIN</span>
+              <span className={`hud-value ${state.wave_info.remaining > 0 ? 'result-missed' : 'result-intercept'}`}>
+                {state.wave_info.remaining}
+              </span>
+            </div>
+            {state.wave_info.all_spawned && (
+              <div className="hud-row">
+                <span className="hud-label">STATUS</span>
+                <span className="hud-value result-intercept">ALL LAUNCHED</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Engagement Stats (Phase 6) */}
+      {state?.engagement_stats && state.engagement_stats.total_threats > 0 && (
+        <div className="hud-panel stats-panel">
+          <div className="hud-title">STATS</div>
+          <div className="hud-content">
+            <div className="hud-row">
+              <span className="hud-label">TGTS</span>
+              <span className="hud-value">{state.engagement_stats.total_threats}</span>
+            </div>
+            <div className="hud-row">
+              <span className="hud-label">INTCP</span>
+              <span className="hud-value result-intercept">
+                {state.intercepted_pairs?.length || 0}
+              </span>
+            </div>
+            {state.engagement_stats.decoys_classified > 0 && (
+              <div className="hud-row">
+                <span className="hud-label">DECOY</span>
+                <span className="hud-value" style={{ color: '#a855f7' }}>
+                  {state.engagement_stats.decoys_classified}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Replay controls */}
       {replayState && (
         <div className="hud-panel replay-panel">

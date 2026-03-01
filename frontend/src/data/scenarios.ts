@@ -258,6 +258,58 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       accuracyWeight: 0.5,
     },
   },
+  {
+    id: 'iron-rain',
+    name: 'Iron Rain',
+    codename: 'IRON RAIN',
+    difficulty: 'HARD',
+    briefing: {
+      situation: 'Intelligence reports a coordinated multi-wave rocket attack. Three waves of mixed Qassam and Grad rockets will arrive at staggered intervals. Some rockets may deploy decoy countermeasures.',
+      objective: 'Survive the full barrage. Let the battery BMC manage engagement priorities. Classify and ignore decoys to conserve ammunition.',
+      constraints: ['3 waves at 8s intervals', 'Mixed threat types (Qassam + Grad)', 'Decoy countermeasures active', 'Single battery defense'],
+      threatPicture: 'Wave 1: 3 Qassam rockets. Wave 2: 4 Grad rockets from south. Wave 3: 5 Qassam rockets from north. Total 12+ threats.',
+    },
+    config: {
+      scenario: 'iron_rain',
+      guidance: 'proportional_nav',
+      evasion: 'none',
+      navConstant: 4,
+      numInterceptors: 0,
+      numTargets: 3,
+    },
+    scoring: {
+      parTime: 45,
+      timeBonus: 4,
+      efficiencyWeight: 0.6,
+      accuracyWeight: 0.4,
+    },
+  },
+  {
+    id: 'last-stand',
+    name: 'Last Stand',
+    codename: 'LAST STAND',
+    difficulty: 'EXTREME',
+    briefing: {
+      situation: 'Massive saturation attack with 4 continuous waves. Battery has reduced ammunition (30 interceptors total). Expect 30+ inbound rockets. This is an ammunition management scenario — every shot must count.',
+      objective: 'Defend Ashkelon for as long as possible. Prioritize threats by IPP — only engage rockets heading for the city. Accept that some rockets will get through when ammo runs out.',
+      constraints: ['4 waves escalating in size', 'Reduced ammo (30 Tamirs)', '30+ total threats', 'Ammo depletion expected'],
+      threatPicture: 'Wave 1: 4 Qassam. Wave 2: 5 Grad. Wave 3: 6 Qassam. Wave 4: 8 Grad + 10 Qassam initial. Over 33 rockets total. Maximum threat.',
+    },
+    config: {
+      scenario: 'last_stand',
+      guidance: 'proportional_nav',
+      evasion: 'none',
+      navConstant: 4,
+      numInterceptors: 0,
+      numTargets: 4,
+    },
+    scoring: {
+      parTime: 55,
+      timeBonus: 3,
+      efficiencyWeight: 0.7,
+      accuracyWeight: 0.3,
+    },
+  },
 ];
 
 export function calculateScore(

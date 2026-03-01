@@ -38,6 +38,8 @@ from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
 from .ipp import ProtectedArea, ImpactPrediction, predict_impact_point, check_threat_to_areas
 from .battery import Battery, BatteryConfig, create_iron_dome_battery
+from .waves import WaveManager, ThreatWave
+from .decoy import deploy_decoys, classify_threat, DecoyConfig
 
 # Optional subsystem imports (features disabled by default)
 try:
@@ -131,6 +133,10 @@ class SimConfig:
     # Battery system (Phase 5)
     batteries: Optional[List['BatteryConfig']] = None
 
+    # Wave system (Phase 6)
+    waves: Optional[List['ThreatWave']] = None
+    enable_decoys: bool = False
+
 
 @dataclass
 class SimState:
@@ -174,6 +180,21 @@ class SimState:
 
     # Battery system (Phase 5)
     batteries: List['Battery'] = field(default_factory=list)
+
+    # Wave system (Phase 6)
+    wave_manager: Optional['WaveManager'] = None
+    decoy_tracking: Dict[str, float] = field(default_factory=dict)  # entity_id -> first_seen_time
+    engagement_stats: Dict[str, int] = field(default_factory=lambda: {
+        "total_threats": 0,
+        "threats_detected": 0,
+        "threats_engaged": 0,
+        "threats_intercepted": 0,
+        "threats_impacted": 0,
+        "decoys_deployed": 0,
+        "decoys_classified": 0,
+        "ammo_expended": 0,
+        "waves_spawned": 0,
+    })
 
     # Legacy property for backward compatibility - single target
     @property
@@ -289,6 +310,19 @@ class SimState:
         # Include battery states
         if self.batteries:
             event["batteries"] = [b.to_state_dict() for b in self.batteries]
+
+        # Include engagement stats (Phase 6)
+        if self.engagement_stats:
+            event["engagement_stats"] = self.engagement_stats
+
+        # Include wave info
+        if self.wave_manager:
+            event["wave_info"] = {
+                "total_threats": self.wave_manager.total_threats,
+                "spawned": self.wave_manager.total_spawned,
+                "remaining": self.wave_manager.total_threats - self.wave_manager.total_spawned,
+                "all_spawned": self.wave_manager.all_spawned,
+            }
 
         return event
 
@@ -414,6 +448,11 @@ class SimEngine:
         # Battery system (Phase 5)
         self.battery_configs: List[BatteryConfig] = self.config.batteries or []
         self.batteries: List[Battery] = []
+
+        # Wave system (Phase 6)
+        self.wave_configs: List[ThreatWave] = self.config.waves or []
+        self.wave_manager: Optional[WaveManager] = None
+        self.enable_decoys: bool = self.config.enable_decoys
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -577,6 +616,11 @@ class SimEngine:
             self.batteries.append(battery)
         # Add batteries to state
         self.state.batteries = self.batteries
+
+        # Initialize wave manager (Phase 6)
+        if self.wave_configs:
+            self.wave_manager = WaveManager(self.wave_configs)
+            self.state.wave_manager = self.wave_manager
 
         self._finalize_scenario_setup(targets, interceptors)
 
@@ -788,6 +832,16 @@ class SimEngine:
 
         dt = self.config.dt
 
+        # 0. WAVES: Spawn new threats from scheduled waves (Phase 6)
+        if self.wave_manager:
+            new_wave_threats = self.wave_manager.update(self.state.sim_time)
+            for threat in new_wave_threats:
+                self.state.targets.append(threat)
+                # Create evasion state for newly spawned threats
+                self._evasion_states[threat.id] = EvasionState()
+                self.state.engagement_stats["waves_spawned"] = self.wave_manager.total_spawned
+                self.state.engagement_stats["total_threats"] = len(self.state.targets)
+
         # Track which targets are still active (not yet intercepted)
         intercepted_target_ids = set(pair[1] for pair in self.state.intercepted_pairs)
         active_targets = [t for t in self.state.targets if t.id not in intercepted_target_ids]
@@ -830,6 +884,18 @@ class SimEngine:
                     target.engagement_decision = "track_only"
                 else:
                     target.engagement_decision = "ignore"
+
+        # 1.6 DECOY CLASSIFICATION: Track and classify potential decoys (Phase 6)
+        if self.enable_decoys:
+            for target in active_targets:
+                if target.id not in self.state.decoy_tracking:
+                    self.state.decoy_tracking[target.id] = self.state.sim_time
+                time_tracked = self.state.sim_time - self.state.decoy_tracking[target.id]
+                is_decoy, confidence = classify_threat(target, time_tracked)
+                if is_decoy and confidence > 0.7:
+                    target.engagement_decision = "ignore"
+                    target.threat_type = "decoy"
+                    self.state.engagement_stats["decoys_classified"] += 1
 
         # 2. GUIDANCE: Calculate acceleration for each interceptor
         # Track which interceptors are still active
@@ -1581,6 +1647,170 @@ SCENARIOS = {
             ),
         ],
     },
+    # ─── WAVE / SATURATION SCENARIOS (Phase 6) ────────────────────────
+    "iron_rain": {
+        "description": "3 waves of mixed rockets with decoys — saturation attack",
+        "target_start": Vec3(8000, 0, 100),
+        "target_velocity": Vec3(-400, 0, 280),
+        "interceptor_start": Vec3(-500, 500, 50),
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 3,       # Initial wave (pre-placed)
+        "num_interceptors": 0,  # Battery handles launches
+        "target_spacing": 2000.0,
+        "threat_type": "qassam",
+        "interceptor_type": "tamir",
+        "enable_decoys": True,
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Sderot",
+                center=Vec3(-2000, 500, 0),
+                radius=2500.0,
+                priority=1,
+                population=30000,
+            ),
+        ],
+        "batteries": [
+            BatteryConfig(
+                position=Vec3(-500, 500, 0),
+                name="Battery Alpha",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                num_launchers=3,
+                missiles_per_launcher=20,
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Sderot",
+                        center=Vec3(-2000, 500, 0),
+                        radius=2500.0,
+                        priority=1,
+                        population=30000,
+                    ),
+                ],
+            ),
+        ],
+        "waves": [
+            ThreatWave(
+                wave_id=1,
+                spawn_time=8.0,
+                threat_type="grad",
+                count=4,
+                spacing=1500.0,
+                start_position=Vec3(9000, -2000, 100),
+                velocity=Vec3(-380, 40, 300),
+                salvo_interval=0.8,
+            ),
+            ThreatWave(
+                wave_id=2,
+                spawn_time=18.0,
+                threat_type="qassam",
+                count=5,
+                spacing=1800.0,
+                start_position=Vec3(8500, 1000, 100),
+                velocity=Vec3(-420, -20, 260),
+                salvo_interval=0.5,
+            ),
+        ],
+    },
+    "last_stand": {
+        "description": "Continuous waves overwhelming a single battery — fight to ammo depletion",
+        "target_start": Vec3(9000, 0, 100),
+        "target_velocity": Vec3(-420, 0, 300),
+        "interceptor_start": Vec3(-500, 0, 50),
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 4,
+        "num_interceptors": 0,
+        "target_spacing": 1500.0,
+        "threat_type": "qassam",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Ashkelon",
+                center=Vec3(-1500, 0, 0),
+                radius=2500.0,
+                priority=1,
+                population=150000,
+            ),
+        ],
+        "batteries": [
+            BatteryConfig(
+                position=Vec3(0, 0, 0),
+                name="Battery Alpha",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                num_launchers=3,
+                missiles_per_launcher=10,  # Reduced ammo — pressure test
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Ashkelon",
+                        center=Vec3(-1500, 0, 0),
+                        radius=2500.0,
+                        priority=1,
+                        population=150000,
+                    ),
+                ],
+            ),
+        ],
+        "waves": [
+            ThreatWave(
+                wave_id=1,
+                spawn_time=6.0,
+                threat_type="grad",
+                count=5,
+                spacing=1200.0,
+                start_position=Vec3(9500, -1500, 100),
+                velocity=Vec3(-400, 30, 280),
+                salvo_interval=0.6,
+            ),
+            ThreatWave(
+                wave_id=2,
+                spawn_time=14.0,
+                threat_type="qassam",
+                count=6,
+                spacing=1400.0,
+                start_position=Vec3(8500, 1500, 100),
+                velocity=Vec3(-430, -20, 290),
+                salvo_interval=0.4,
+            ),
+            ThreatWave(
+                wave_id=3,
+                spawn_time=22.0,
+                threat_type="grad",
+                count=8,
+                spacing=1000.0,
+                start_position=Vec3(10000, 0, 100),
+                velocity=Vec3(-450, 0, 310),
+                salvo_interval=0.3,
+            ),
+            ThreatWave(
+                wave_id=4,
+                spawn_time=32.0,
+                threat_type="qassam",
+                count=10,
+                spacing=800.0,
+                start_position=Vec3(9000, 500, 100),
+                velocity=Vec3(-440, -10, 300),
+                salvo_interval=0.2,
+            ),
+        ],
+    },
 }
 
 
@@ -1594,6 +1824,8 @@ def load_scenario(name: str) -> dict:
     - num_targets: Number of targets to spawn (optional, default 1)
     - target_spacing: Lateral spacing for multi-target (optional)
     - additional_targets: List of explicit target configs (optional)
+    - waves: List of ThreatWave configs (optional, Phase 6)
+    - batteries: List of BatteryConfig (optional, Phase 5)
     """
     if name not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {name}. Available: {list(SCENARIOS.keys())}")

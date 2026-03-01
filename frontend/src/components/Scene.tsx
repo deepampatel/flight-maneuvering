@@ -154,6 +154,18 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelect
         {entity.id}
       </Text>
 
+      {/* Threat type label (Phase 6) */}
+      {entity.threat_type && !isIntercepted && (
+        <Text
+          position={[position[0], position[1] + 0.38, position[2]]}
+          fontSize={0.06}
+          color={entity.threat_type === 'decoy' ? '#a855f7' : '#94a3b8'}
+          anchorX="center"
+        >
+          {entity.threat_type === 'decoy' ? 'DECOY' : entity.threat_type.toUpperCase()}
+        </Text>
+      )}
+
       {/* Engagement decision label (IPP) */}
       {engagementDecision && !isIntercepted && (
         <Text

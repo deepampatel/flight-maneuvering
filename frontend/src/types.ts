@@ -64,6 +64,26 @@ export interface BatteryState {
   }[];
 }
 
+// Phase 6: Engagement Statistics
+export interface EngagementStats {
+  total_threats: number;
+  threats_detected: number;
+  threats_engaged: number;
+  threats_intercepted: number;
+  threats_impacted: number;
+  decoys_deployed: number;
+  decoys_classified: number;
+  ammo_expended: number;
+  waves_spawned: number;
+}
+
+export interface WaveInfo {
+  total_threats: number;
+  spawned: number;
+  remaining: number;
+  all_spawned: boolean;
+}
+
 export interface EntityState {
   id: string;
   type: 'target' | 'interceptor';
@@ -323,6 +343,9 @@ export interface SimStateEvent {
   impact_predictions?: Record<string, ImpactPrediction>;
   // Phase 5: Battery System
   batteries?: BatteryState[];
+  // Phase 6: Saturation & Waves
+  engagement_stats?: EngagementStats;
+  wave_info?: WaveInfo;
 }
 
 // Launcher (Bogey) Types
