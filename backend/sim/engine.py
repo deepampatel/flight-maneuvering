@@ -104,6 +104,7 @@ class SimConfig:
     dt: float = 0.02            # Timestep (50 Hz)
     max_time: float = 60.0      # Max sim duration (seconds)
     kill_radius: float = 150.0  # Intercept success radius (meters) - proximity fuse
+    lethal_radius: float = 20.0 # Warhead blast/fragmentation radius for Pk model
     real_time: bool = True      # Try to match wall-clock time
 
     # Environmental effects
@@ -768,22 +769,36 @@ class SimEngine:
 
         self.state.miss_distance = min_miss_distance
 
-        # Check intercept (any interceptor hits any target)
+        # Check intercept (any interceptor hits any target) — probabilistic Pk model
+        import random as _random
+        from .ipp import compute_pk
         new_intercepts = []
+        expended_interceptors = set()
         for interceptor in active_interceptors:
             for target in active_targets:
                 dist = interceptor.position.distance_to(target.position)
                 if dist <= self.config.kill_radius:
-                    new_intercepts.append((interceptor.id, target.id))
-                    # Record the first intercept details for backward compatibility
-                    if self.state.intercepting_id is None:
-                        self.state.intercepting_id = interceptor.id
-                        self.state.intercepted_target_id = target.id
+                    pk = compute_pk(dist, self.config.lethal_radius)
+                    if _random.random() < pk:
+                        new_intercepts.append((interceptor.id, target.id))
+                        if self.state.intercepting_id is None:
+                            self.state.intercepting_id = interceptor.id
+                            self.state.intercepted_target_id = target.id
+                    else:
+                        # Near miss — interceptor expended but target survives
+                        expended_interceptors.add(interceptor.id)
 
         # Add new intercepts to the list
         for pair in new_intercepts:
             if pair not in self.state.intercepted_pairs:
                 self.state.intercepted_pairs.append(pair)
+
+        # Remove near-miss interceptors (expended without a kill)
+        if expended_interceptors:
+            self.state.interceptors = [
+                i for i in self.state.interceptors
+                if i.id not in expended_interceptors
+            ]
 
         # Check if all targets have been intercepted
         intercepted_target_ids = set(pair[1] for pair in self.state.intercepted_pairs)
@@ -1509,7 +1524,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Tel Aviv",
+                name="Delta City",
                 center=Vec3(-2000, 1000, 0),  # Offset in Y so 2 rockets hit, 1 misses
                 radius=3000.0,
                 priority=1,
@@ -1531,7 +1546,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Ashkelon",
+                name="Bravo City",
                 center=Vec3(-1000, 0, 0),
                 radius=2500.0,
                 priority=1,
@@ -1563,7 +1578,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Sderot",
+                name="Alpha City",
                 center=Vec3(-2000, 500, 0),
                 radius=2500.0,
                 priority=1,
@@ -1588,7 +1603,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Sderot",
+                        name="Alpha City",
                         center=Vec3(-2000, 500, 0),
                         radius=2500.0,
                         priority=1,
@@ -1613,7 +1628,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Ashkelon",
+                name="Bravo City",
                 center=Vec3(-1000, -1000, 0),
                 radius=2500.0,
                 priority=1,
@@ -1621,7 +1636,7 @@ SCENARIOS = {
             ),
             ProtectedArea(
                 id="city_bravo",
-                name="Beer Sheva",
+                name="Charlie City",
                 center=Vec3(-1000, 4000, 0),
                 radius=3000.0,
                 priority=2,
@@ -1646,7 +1661,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Ashkelon",
+                        name="Bravo City",
                         center=Vec3(-1000, -1000, 0),
                         radius=2500.0,
                         priority=1,
@@ -1671,7 +1686,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_bravo",
-                        name="Beer Sheva",
+                        name="Charlie City",
                         center=Vec3(-1000, 4000, 0),
                         radius=3000.0,
                         priority=2,
@@ -1698,7 +1713,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Sderot",
+                name="Alpha City",
                 center=Vec3(-2000, 500, 0),
                 radius=2500.0,
                 priority=1,
@@ -1722,7 +1737,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Sderot",
+                        name="Alpha City",
                         center=Vec3(-2000, 500, 0),
                         radius=2500.0,
                         priority=1,
@@ -1769,7 +1784,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Ashkelon",
+                name="Bravo City",
                 center=Vec3(-1500, 0, 0),
                 radius=2500.0,
                 priority=1,
@@ -1793,7 +1808,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Ashkelon",
+                        name="Bravo City",
                         center=Vec3(-1500, 0, 0),
                         radius=2500.0,
                         priority=1,
@@ -1861,7 +1876,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Haifa",
+                name="Echo City",
                 center=Vec3(-5000, 0, 0),
                 radius=4000.0,
                 priority=1,
@@ -1886,7 +1901,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Haifa",
+                        name="Echo City",
                         center=Vec3(-5000, 0, 0),
                         radius=4000.0,
                         priority=1,
@@ -1911,7 +1926,7 @@ SCENARIOS = {
         "protected_areas": [
             ProtectedArea(
                 id="city_alpha",
-                name="Tel Aviv",
+                name="Delta City",
                 center=Vec3(-3000, 0, 0),
                 radius=5000.0,
                 priority=1,
@@ -1945,7 +1960,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Tel Aviv",
+                        name="Delta City",
                         center=Vec3(-3000, 0, 0),
                         radius=5000.0,
                         priority=1,
@@ -1997,7 +2012,7 @@ SCENARIOS = {
                 protected_areas=[
                     ProtectedArea(
                         id="city_alpha",
-                        name="Tel Aviv",
+                        name="Delta City",
                         center=Vec3(-3000, 0, 0),
                         radius=5000.0,
                         priority=1,

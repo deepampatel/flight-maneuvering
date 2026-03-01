@@ -212,7 +212,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     codename: 'IRON FORTRESS',
     difficulty: 'HARD',
     briefing: {
-      situation: 'A salvo of 5 Qassam rockets has been launched from eastern Gaza toward the city of Sderot. Your Iron Dome battery must autonomously detect, evaluate, and engage all threats heading for the defended city.',
+      situation: 'A salvo of 5 Qassam rockets has been launched from the eastern border toward Alpha City. Your Iron Dome battery must autonomously detect, evaluate, and engage all threats heading for the defended city.',
       objective: 'Let the battery BMC autonomously engage all threats predicted to impact the defended area. Conserve ammo by ignoring rockets landing in open fields.',
       constraints: ['Battery-autonomous engagement', 'IPP-based fire control', '5 rockets inbound', 'Limited magazine depth'],
       threatPicture: 'Five Qassam-type unguided rockets on ballistic trajectories. Battery must handle detection through engagement autonomously.',
@@ -238,7 +238,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     codename: 'TWIN SHIELDS',
     difficulty: 'EXTREME',
     briefing: {
-      situation: 'A massive Grad rocket salvo of 8 rockets targets two cities simultaneously. Two Iron Dome batteries must coordinate to defend Ashkelon and Beer Sheva against the incoming barrage.',
+      situation: 'A massive Grad rocket salvo of 8 rockets targets two cities simultaneously. Two Iron Dome batteries must coordinate to defend Bravo City and Charlie City against the incoming barrage.',
       objective: 'Both batteries must autonomously engage threats targeting their respective defended cities. No rocket must reach a populated area.',
       constraints: ['Two autonomous batteries', '8 rockets inbound', 'Two defended cities', 'Overlapping sectors'],
       threatPicture: 'Eight Grad rockets across wide frontage. Split between two population centers. Both batteries must engage simultaneously.',
@@ -291,7 +291,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     difficulty: 'EXTREME',
     briefing: {
       situation: 'Massive saturation attack with 4 continuous waves. Battery has reduced ammunition (30 interceptors total). Expect 30+ inbound rockets. This is an ammunition management scenario — every shot must count.',
-      objective: 'Defend Ashkelon for as long as possible. Prioritize threats by IPP — only engage rockets heading for the city. Accept that some rockets will get through when ammo runs out.',
+      objective: 'Defend Bravo City for as long as possible. Prioritize threats by IPP — only engage rockets heading for the city. Accept that some rockets will get through when ammo runs out.',
       constraints: ['4 waves escalating in size', 'Reduced ammo (30 Tamirs)', '30+ total threats', 'Ammo depletion expected'],
       threatPicture: 'Wave 1: 4 Qassam. Wave 2: 5 Grad. Wave 3: 6 Qassam. Wave 4: 8 Grad + 10 Qassam initial. Over 33 rockets total. Maximum threat.',
     },
@@ -317,7 +317,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     codename: 'SLING SHOT',
     difficulty: 'HARD',
     briefing: {
-      situation: "Three subsonic cruise missiles detected heading toward Haifa. David's Sling battery is the primary defense layer for this medium-range threat.",
+      situation: "Three subsonic cruise missiles detected heading toward Echo City. David's Sling battery is the primary defense layer for this medium-range threat.",
       objective: "Intercept all cruise missiles using Stunner interceptors. David's Sling engages threats at 40-300km range — a tier above Iron Dome.",
       constraints: ["Cruise missiles at 300 m/s", 'Stunner interceptors (Mach 7.5)', "David's Sling min range 40km", 'Medium-range engagement'],
       threatPicture: '3 subsonic cruise missiles approaching from the east at 5km altitude. Each is guided and capable of terminal maneuvers.',
@@ -344,7 +344,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     difficulty: 'EXTREME',
     briefing: {
       situation: 'Combined attack: short-range rockets, cruise missiles, and follow-on waves. All three defense tiers activated. TEWA system coordinates engagement across Iron Dome, David\'s Sling, and supporting batteries.',
-      objective: 'Defend Tel Aviv and the Air Force Base using layered defense. TEWA automatically assigns each threat to the appropriate tier. Iron Dome handles rockets, David\'s Sling handles cruise missiles.',
+      objective: 'Defend Delta City and the Air Force Base using layered defense. TEWA automatically assigns each threat to the appropriate tier. Iron Dome handles rockets, David\'s Sling handles cruise missiles.',
       constraints: ['3 defense tiers active', 'Mixed threat types', 'TEWA automated assignment', '3 follow-on waves', '20+ total threats'],
       threatPicture: 'Initial: 4 Qassam rockets. Wave 1 (T+5s): 3 cruise missiles. Wave 2 (T+12s): 5 Qassam rockets. Wave 3 (T+20s): 4 Grad rockets. Multi-axis, multi-layer attack.',
     },

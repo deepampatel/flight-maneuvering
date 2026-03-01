@@ -194,29 +194,24 @@ def check_threat_to_areas(
 
 
 def compute_pk(
-    interceptor_speed: float,
-    target_speed: float,
-    range_to_target: float,
-    target_cross_section: float = 0.02,
+    miss_distance: float,
+    lethal_radius: float = 20.0,
 ) -> float:
     """
-    Estimate probability of kill (Pk).
+    Probability of kill based on miss distance at closest point of approach.
 
-    Simple model based on:
-    - Closing velocity (higher = harder)
-    - Range (further = less accurate)
-    - Target size (smaller = harder to hit)
+    Uses a Gaussian warhead lethality model:
+        Pk = exp(-(miss_distance / lethal_radius)^2)
 
-    Real Pk models are classified; this gives intuitive behavior.
+    At miss_distance = 0:               Pk = 1.0   (direct hit)
+    At miss_distance = lethal_radius:    Pk = 0.368 (1/e)
+    At miss_distance = 2*lethal_radius:  Pk = 0.018
+
+    Args:
+        miss_distance: Distance between interceptor and target at CPA (meters)
+        lethal_radius: Effective warhead blast/fragmentation radius (meters)
     """
-    # Closing velocity factor (0.5-1.0)
-    v_close = interceptor_speed + target_speed
-    v_factor = max(0.5, 1.0 - (v_close / 5000.0))
-
-    # Range factor (0.3-1.0)
-    r_factor = max(0.3, 1.0 - (range_to_target / 100000.0))
-
-    # Size factor (0.5-1.0)
-    s_factor = min(1.0, 0.5 + target_cross_section * 10)
-
-    return min(0.95, v_factor * r_factor * s_factor)
+    import math
+    if miss_distance <= 0:
+        return 1.0
+    return math.exp(-(miss_distance / lethal_radius) ** 2)

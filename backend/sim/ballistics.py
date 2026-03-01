@@ -30,6 +30,7 @@ from .vector import Vec3
 class FlightPhase(str, Enum):
     """Distinct phases of missile/rocket flight."""
     BOOST = "boost"          # Motor burning, thrust active
+    SUSTAIN = "sustain"      # Sustainer motor, lower thrust
     BALLISTIC = "ballistic"  # Motor off, gravity + drag only
     TERMINAL = "terminal"    # Final engagement phase
 
@@ -38,15 +39,26 @@ class FlightPhase(str, Enum):
 class PropulsionConfig:
     """Rocket motor parameters.
 
-    thrust:           Motor thrust in Newtons
-    burn_time:        How long the motor burns (seconds)
-    specific_impulse: Motor efficiency (seconds) — higher = more efficient
-    fuel_mass:        Mass of fuel (kg) — consumed during burn
+    Boost stage:
+      thrust:           Motor thrust in Newtons
+      burn_time:        How long the motor burns (seconds)
+      specific_impulse: Motor efficiency (seconds)
+      fuel_mass:        Mass of fuel (kg)
+
+    Sustain stage (optional):
+      sustain_thrust:     Lower thrust for cruise phase (N)
+      sustain_burn_time:  Duration of sustain phase (seconds)
+      sustain_fuel_mass:  Fuel reserved for sustain (kg)
     """
     thrust: float          # N
     burn_time: float       # s
     specific_impulse: float = 250.0  # s (typical solid rocket)
     fuel_mass: float = 20.0  # kg
+
+    # Sustain stage (optional — 0 = no sustainer)
+    sustain_thrust: float = 0.0      # N
+    sustain_burn_time: float = 0.0   # s
+    sustain_fuel_mass: float = 0.0   # kg
 
 
 # Gravity vector (constant for now, could be altitude-dependent later)
@@ -90,17 +102,27 @@ def compute_thrust_force(
     """
     Thrust force along velocity direction.
 
-    Active only during BOOST phase (burn_elapsed < burn_time).
+    Phases: BOOST → SUSTAIN → coast (no thrust).
+    Boost runs for burn_time seconds, then sustain for sustain_burn_time.
     """
-    if burn_elapsed >= propulsion.burn_time:
+    total_boost = propulsion.burn_time
+    total_sustain_end = total_boost + propulsion.sustain_burn_time
+
+    if burn_elapsed < total_boost:
+        # Boost phase — full thrust
+        thrust = propulsion.thrust
+    elif propulsion.sustain_thrust > 0 and burn_elapsed < total_sustain_end:
+        # Sustain phase — reduced thrust
+        thrust = propulsion.sustain_thrust
+    else:
         return Vec3.zero()
 
     speed = velocity.magnitude()
     if speed < 0.1:
         # If nearly stationary, thrust upward (launch phase)
-        return Vec3(0.0, 0.0, propulsion.thrust)
+        return Vec3(0.0, 0.0, thrust)
 
-    return velocity.normalized() * propulsion.thrust
+    return velocity.normalized() * thrust
 
 
 def compute_current_mass(
@@ -109,18 +131,28 @@ def compute_current_mass(
     burn_elapsed: float,
 ) -> float:
     """
-    Current total mass = dry mass + remaining fuel.
+    Current total mass = dry mass + remaining boost fuel + remaining sustain fuel.
 
-    Mass decreases linearly during burn.
+    Boost fuel consumed first, then sustain fuel.
     """
     if propulsion is None:
         return dry_mass
 
-    fuel_remaining = max(
-        0.0,
-        propulsion.fuel_mass * (1.0 - burn_elapsed / propulsion.burn_time)
-    )
-    return dry_mass + fuel_remaining
+    # Boost fuel remaining
+    if propulsion.burn_time > 0:
+        boost_fraction = min(1.0, burn_elapsed / propulsion.burn_time)
+    else:
+        boost_fraction = 1.0
+    boost_fuel_remaining = max(0.0, propulsion.fuel_mass * (1.0 - boost_fraction))
+
+    # Sustain fuel remaining
+    sustain_fuel_remaining = propulsion.sustain_fuel_mass
+    if burn_elapsed > propulsion.burn_time and propulsion.sustain_burn_time > 0:
+        sustain_elapsed = burn_elapsed - propulsion.burn_time
+        sustain_fraction = min(1.0, sustain_elapsed / propulsion.sustain_burn_time)
+        sustain_fuel_remaining = max(0.0, propulsion.sustain_fuel_mass * (1.0 - sustain_fraction))
+
+    return dry_mass + boost_fuel_remaining + sustain_fuel_remaining
 
 
 def determine_flight_phase(
@@ -131,8 +163,11 @@ def determine_flight_phase(
     """Determine current flight phase."""
     if is_terminal:
         return FlightPhase.TERMINAL
-    if propulsion and burn_elapsed < propulsion.burn_time:
-        return FlightPhase.BOOST
+    if propulsion:
+        if burn_elapsed < propulsion.burn_time:
+            return FlightPhase.BOOST
+        if propulsion.sustain_thrust > 0 and burn_elapsed < propulsion.burn_time + propulsion.sustain_burn_time:
+            return FlightPhase.SUSTAIN
     return FlightPhase.BALLISTIC
 
 
@@ -163,11 +198,14 @@ def apply_ballistic_physics(
     if enable_gravity:
         forces = forces + GRAVITY * current_mass
 
-    # 2. Thrust (during boost phase)
-    if propulsion and burn_elapsed < propulsion.burn_time:
+    # 2. Thrust (during boost or sustain phase)
+    total_motor_time = 0.0
+    if propulsion:
+        total_motor_time = propulsion.burn_time + propulsion.sustain_burn_time
+    if propulsion and burn_elapsed < total_motor_time:
         thrust_force = compute_thrust_force(velocity, propulsion, burn_elapsed)
         forces = forces + thrust_force
-        burn_elapsed = min(burn_elapsed + dt, propulsion.burn_time)
+        burn_elapsed = min(burn_elapsed + dt, total_motor_time)
 
     # 3. Drag
     if enable_drag:

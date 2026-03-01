@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Dict
 import math
+import random
 
 from .vector import Vec3
 from .entities import Entity, create_interceptor_from_catalog
@@ -32,6 +33,7 @@ from .ipp import (
     check_threat_to_areas,
     compute_pk,
 )
+from .sensor import SensorConfig, SensorModel
 
 
 class BatteryStatus(str, Enum):
@@ -70,6 +72,9 @@ class TrackedThreat:
     assigned_interceptor: Optional[str] = None
     intercept_count: int = 0      # How many interceptors launched at this threat
     max_intercepts: int = 2       # Shoot-look-shoot limit
+    first_qualified_time: Optional[float] = None  # sim_time when threat first qualified for engagement
+    detection_count: int = 0      # Number of radar detections (for track confirmation)
+    is_firm_track: bool = False   # True after N detections confirm the track
 
 
 @dataclass
@@ -103,6 +108,13 @@ class BatteryConfig:
     # Launch parameters
     launch_speed: float = 250.0      # Initial interceptor speed (m/s)
     launch_elevation: float = 80.0   # Launch angle (degrees from horizontal)
+
+    # Operator reaction time
+    operator_reaction_time: float = 2.0  # Seconds between threat qualification and launch auth
+
+    # Radar detection model
+    radar_pd: float = 0.92           # Base detection probability per scan
+    track_confirm_detections: int = 3  # Detections needed before firm track
 
 
 @dataclass
@@ -139,6 +151,18 @@ class Battery:
             )
             for i in range(config.num_launchers)
         ]
+
+        # Radar sensor model for probabilistic detection
+        self._sensor = SensorModel(SensorConfig(
+            max_range=config.radar_range,
+            min_range=config.min_range * 0.5,  # Detect earlier than engage
+            field_of_view=config.radar_sector,
+            detection_probability=config.radar_pd,
+            pd_range_falloff=0.6,
+            update_rate=10.0,
+            track_init_detections=config.track_confirm_detections,
+            use_kalman=False,  # Keep it simple — alpha-beta is fine for battery radar
+        ))
 
         # Tracking
         self.tracked_threats: Dict[str, TrackedThreat] = {}
@@ -242,7 +266,7 @@ class Battery:
             iid for iid in self.active_interceptors if iid in active_interceptor_ids
         ]
 
-        # --- RADAR SCAN: Detect and track threats ---
+        # --- RADAR SCAN: Detect and track threats (probabilistic) ---
         for target in targets:
             if not self._is_in_radar_sector(target.position):
                 # Lost track
@@ -252,19 +276,31 @@ class Battery:
 
             rng = self._range_to_threat(target.position)
 
+            # Probabilistic detection: roll against Pd based on range
+            pd = self._sensor.compute_detection_probability(rng)
+            detected = random.random() < pd
+
             if target.id not in self.tracked_threats:
+                if not detected:
+                    continue  # Radar missed this scan — threat not yet in track file
                 # New detection
                 self.tracked_threats[target.id] = TrackedThreat(
                     threat_id=target.id,
                     first_detected=sim_time,
                     position=target.position,
                     velocity=target.velocity,
+                    detection_count=1,
                 )
             else:
-                # Update track
+                # Existing track
                 track = self.tracked_threats[target.id]
-                track.position = target.position
-                track.velocity = target.velocity
+                if detected:
+                    track.position = target.position
+                    track.velocity = target.velocity
+                    track.detection_count += 1
+                    if track.detection_count >= self.config.track_confirm_detections:
+                        track.is_firm_track = True
+                # If not detected this scan, track coasts with stale data
 
             # Update IPP from engine's predictions
             if target.id in impact_predictions:
@@ -289,6 +325,10 @@ class Battery:
             ]:
                 continue
 
+            # Require firm track (enough detections to confirm)
+            if not track.is_firm_track:
+                continue
+
             # Check IPP: only engage if prediction says ENGAGE
             if track.prediction and not track.prediction.engage:
                 continue  # Not threatening a protected area
@@ -300,6 +340,12 @@ class Battery:
 
             # Check altitude
             if track.position.z < self.config.min_altitude:
+                continue
+
+            # Operator reaction time — delay between qualification and authorization
+            if track.first_qualified_time is None:
+                track.first_qualified_time = sim_time
+            if sim_time - track.first_qualified_time < self.config.operator_reaction_time:
                 continue
 
             # Check max simultaneous engagements

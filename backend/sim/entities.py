@@ -157,13 +157,11 @@ class Entity:
             "engagement_decision": self.engagement_decision,
         }
         if self.propulsion:
-            fuel_remaining = max(
-                0.0,
-                self.propulsion.fuel_mass * (1.0 - self.burn_elapsed / self.propulsion.burn_time)
-            ) if self.propulsion.burn_time > 0 else 0.0
-            d["fuel_remaining"] = fuel_remaining
-            d["fuel_total"] = self.propulsion.fuel_mass
-            d["burn_time"] = self.propulsion.burn_time
+            total_fuel = self.propulsion.fuel_mass + self.propulsion.sustain_fuel_mass
+            fuel_remaining = compute_current_mass(self.dry_mass, self.propulsion, self.burn_elapsed) - self.dry_mass
+            d["fuel_remaining"] = max(0.0, fuel_remaining)
+            d["fuel_total"] = total_fuel
+            d["burn_time"] = self.propulsion.burn_time + self.propulsion.sustain_burn_time
             d["burn_elapsed"] = self.burn_elapsed
         return d
 

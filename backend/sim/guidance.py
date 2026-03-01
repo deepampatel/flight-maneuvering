@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+import math
 import numpy as np
 
 from .vector import Vec3
@@ -51,6 +52,21 @@ class GuidanceType(str, Enum):
     PROPORTIONAL_NAV = "proportional_nav"
     AUGMENTED_PN = "augmented_pn"
     ML_POLICY = "ml_policy"
+
+
+@dataclass
+class SeekerConfig:
+    """Seeker head gimbal limits.
+
+    Real seekers (IR or active radar) have physical constraints:
+    - max_look_angle: how far off-boresight the seeker can point (degrees)
+    - max_gimbal_rate: how fast the seeker can slew (degrees/sec)
+
+    If the target moves outside the look angle, the seeker loses lock
+    and must fall back to pure pursuit / inertial guidance.
+    """
+    max_look_angle: float = 60.0      # degrees off-boresight
+    max_gimbal_rate: float = 30.0     # degrees per second
 
 
 @dataclass
@@ -73,6 +89,7 @@ class GuidanceState:
 
     # Previous state (for computing rates)
     prev_los: Optional[Vec3] = None
+    prev_accel_cmd: Optional[Vec3] = None  # For gimbal rate clamping
     dt: float = 0.02
 
     def __post_init__(self):
@@ -92,6 +109,9 @@ class GuidanceParams:
 
     # Bias term for augmented PN
     use_augmented: bool = False
+
+    # Seeker gimbal limits (None = unlimited)
+    seeker: Optional[SeekerConfig] = None
 
 
 def compute_los_rate(state: GuidanceState) -> Vec3:
@@ -151,6 +171,62 @@ def compute_closing_velocity(state: GuidanceState) -> float:
 
     # Closing velocity is relative velocity component along LOS
     return rel_vel.dot(los_unit)
+
+
+def check_seeker_limits(
+    state: GuidanceState,
+    params: GuidanceParams,
+    accel_cmd: Vec3,
+) -> tuple[Vec3, bool]:
+    """
+    Apply seeker gimbal limits to the guidance command.
+
+    Returns (clamped_accel, within_fov).
+    If the target is outside the seeker FOV, returns pure pursuit command + False.
+    Also clamps the angular rate of the acceleration command to the gimbal rate.
+    """
+    if params.seeker is None:
+        return accel_cmd, True
+
+    # Check look angle: angle between velocity vector and LOS
+    los = state.target_pos - state.interceptor_pos
+    los_mag = los.magnitude()
+    vel_mag = state.interceptor_vel.magnitude()
+
+    if los_mag < 1.0 or vel_mag < 1.0:
+        return accel_cmd, True
+
+    los_unit = los / los_mag
+    vel_unit = state.interceptor_vel / vel_mag
+
+    cos_look = los_unit.dot(vel_unit)
+    cos_look = max(-1.0, min(1.0, cos_look))
+    look_angle_deg = math.degrees(math.acos(cos_look))
+
+    # If target outside seeker FOV, fall back to pure pursuit
+    if look_angle_deg > params.seeker.max_look_angle:
+        direction = los.normalized()
+        return direction * state.interceptor_max_accel, False
+
+    # Clamp angular rate of acceleration command change
+    if state.prev_accel_cmd is not None and state.dt > 0:
+        prev_mag = state.prev_accel_cmd.magnitude()
+        cmd_mag = accel_cmd.magnitude()
+        if prev_mag > 1.0 and cmd_mag > 1.0:
+            prev_unit = state.prev_accel_cmd / prev_mag
+            cmd_unit = accel_cmd / cmd_mag
+            cos_delta = prev_unit.dot(cmd_unit)
+            cos_delta = max(-1.0, min(1.0, cos_delta))
+            delta_deg = math.degrees(math.acos(cos_delta))
+            max_delta = params.seeker.max_gimbal_rate * state.dt
+            if delta_deg > max_delta and delta_deg > 0.01:
+                # Interpolate between previous and desired direction
+                blend = max_delta / delta_deg
+                blended = state.prev_accel_cmd * (1.0 - blend) + accel_cmd * blend
+                if blended.magnitude() > 0.1:
+                    accel_cmd = blended.normalized() * cmd_mag
+
+    return accel_cmd, True
 
 
 def pure_pursuit(state: GuidanceState, params: GuidanceParams) -> Vec3:
@@ -229,10 +305,20 @@ def proportional_navigation(state: GuidanceState, params: GuidanceParams) -> Vec
         # Add term to compensate for target acceleration
         accel_cmd = accel_cmd + state.target_accel * (params.nav_constant / 2.0)
 
+    # Endgame boost: increase agility in the final 1km
+    effective_max_accel = state.interceptor_max_accel
+    if distance < 1000.0:
+        endgame_factor = 1.0 + (1.0 - distance / 1000.0) * 0.5  # Up to 1.5× at point blank
+        accel_cmd = accel_cmd * endgame_factor
+        effective_max_accel *= 1.5  # Allow higher G-loading in terminal phase
+
     # Clamp to max acceleration
     accel_mag = accel_cmd.magnitude()
-    if accel_mag > state.interceptor_max_accel:
-        accel_cmd = accel_cmd.normalized() * state.interceptor_max_accel
+    if accel_mag > effective_max_accel:
+        accel_cmd = accel_cmd.normalized() * effective_max_accel
+
+    # Apply seeker gimbal limits
+    accel_cmd, _in_fov = check_seeker_limits(state, params, accel_cmd)
 
     return accel_cmd
 
@@ -329,7 +415,8 @@ def create_guidance_function(
     """
     from .engine import SimState  # Import here to avoid circular
 
-    params = params or GuidanceParams()
+    if params is None:
+        params = GuidanceParams(seeker=SeekerConfig())
 
     # Handle ML guidance specially
     if guidance_type == GuidanceType.ML_POLICY:
