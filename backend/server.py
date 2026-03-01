@@ -15,6 +15,7 @@ that would allow separation later.
 from __future__ import annotations
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 from typing import Set, Optional
 
@@ -108,6 +109,24 @@ run_task: Optional[asyncio.Task] = None
 recording_manager = get_recording_manager()
 current_replay_engine: Optional[ReplayEngine] = None
 replay_task: Optional[asyncio.Task] = None
+
+# ── Computation cache for expensive endpoints ──────────────────
+# Prevents redundant geometry/threat/WTA calculations within the same sim tick
+_endpoint_cache: dict[str, tuple[float, object]] = {}
+_CACHE_TTL = 0.5  # seconds
+
+def _cache_get(key: str) -> object | None:
+    """Return cached result if fresh, else None."""
+    entry = _endpoint_cache.get(key)
+    if entry and (time.monotonic() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+def _cache_set(key: str, value: object) -> None:
+    _endpoint_cache[key] = (time.monotonic(), value)
+
+def _cache_clear() -> None:
+    _endpoint_cache.clear()
 
 # Global sensor states for track management
 sensor_states: dict = {}  # interceptor_id -> SensorState
@@ -528,6 +547,8 @@ async def start_run(config: RunConfig):
     """
     global current_engine, run_task
 
+    _cache_clear()  # Clear computation cache for new run
+
     # Cancel any existing run
     if run_task and not run_task.done():
         run_task.cancel()
@@ -712,8 +733,8 @@ async def start_run(config: RunConfig):
             )
             current_engine.state.launchers.append(launcher)
 
-    # Scenario Builder: custom batteries
-    if config.custom_batteries:
+    # Scenario Builder: custom batteries (explicit list overrides scenario defaults)
+    if config.custom_batteries is not None:
         from sim.battery import BatteryConfig
         from sim.ipp import ProtectedArea as IPPArea
         custom_battery_configs = []
@@ -725,6 +746,7 @@ async def start_run(config: RunConfig):
                     for pa in config.custom_protected_areas:
                         if pa.id == area_id:
                             linked_areas.append(IPPArea(
+                                id=pa.id,
                                 name=pa.name,
                                 center=Vec3(pa.center.x, pa.center.y, pa.center.z),
                                 radius=pa.radius,
@@ -749,11 +771,13 @@ async def start_run(config: RunConfig):
             ))
         current_engine.battery_configs = custom_battery_configs
 
-    # Scenario Builder: custom protected areas (also add to engine directly)
-    if config.custom_protected_areas:
+    # Scenario Builder: custom protected areas (explicit list overrides scenario defaults)
+    if config.custom_protected_areas is not None:
         from sim.ipp import ProtectedArea as IPPArea
+        current_engine.protected_areas = []  # Clear scenario defaults
         for pa in config.custom_protected_areas:
             area = IPPArea(
+                id=pa.id,
                 name=pa.name,
                 center=Vec3(pa.center.x, pa.center.y, pa.center.z),
                 radius=pa.radius,
@@ -761,8 +785,8 @@ async def start_run(config: RunConfig):
             )
             current_engine.protected_areas.append(area)
 
-    # Scenario Builder: custom waves
-    if config.custom_waves:
+    # Scenario Builder: custom waves (explicit list overrides scenario defaults)
+    if config.custom_waves is not None:
         import math
         from sim.waves import ThreatWave
         custom_wave_list = []
@@ -965,6 +989,10 @@ async def get_intercept_geometry():
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
 
+    cached = _cache_get("intercept_geometry")
+    if cached is not None:
+        return cached
+
     state = current_engine.state
 
     # Use multi-target geometry computation when applicable
@@ -974,12 +1002,14 @@ async def get_intercept_geometry():
         # Backward compatible for single target
         geometries = compute_all_geometries(state.interceptors, state.target)
 
-    return {
+    result = {
         "timestamp": state.sim_time,
         "num_targets": len(state.targets),
         "num_interceptors": len(state.interceptors),
         "geometries": [g.to_dict() for g in geometries]
     }
+    _cache_set("intercept_geometry", result)
+    return result
 
 
 # ============================================================
@@ -997,6 +1027,11 @@ async def get_threat_assessment(interceptor_id: str = None):
     """
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
+
+    cache_key = f"threat_assessment_{interceptor_id or 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     state = current_engine.state
     assessments = []
@@ -1022,10 +1057,12 @@ async def get_threat_assessment(interceptor_id: str = None):
         )
         assessments.append(assessment.to_dict())
 
-    return {
+    result = {
         "num_targets": len(state.targets),
         "assessments": assessments
     }
+    _cache_set(cache_key, result)
+    return result
 
 
 @app.post("/threat-assessment/configure")
@@ -1359,6 +1396,11 @@ async def get_current_assignments(algorithm: str = "greedy_nearest"):
     if current_engine is None or current_engine.state is None:
         raise HTTPException(status_code=400, detail="No active simulation")
 
+    cache_key = f"wta_{algorithm}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     state = current_engine.state
 
     # Validate algorithm
@@ -1385,7 +1427,9 @@ async def get_current_assignments(algorithm: str = "greedy_nearest"):
         threats
     )
 
-    return result.to_dict()
+    response = result.to_dict()
+    _cache_set(cache_key, response)
+    return response
 
 
 @app.post("/wta/configure")

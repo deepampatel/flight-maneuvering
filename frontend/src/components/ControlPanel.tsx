@@ -43,6 +43,7 @@ import type {
 } from '../types';
 
 interface ControlPanelProps {
+  hideToolbar?: boolean;
   connected: boolean;
   state: SimStateEvent | null;
   scenarios: Record<string, Scenario>;
@@ -146,13 +147,12 @@ export function ControlPanel(props: ControlPanelProps) {
     onStart, onStop, onRunMonteCarlo, onRunEnvelope,
     monteCarloLoading, envelopeLoading,
     interceptGeometry, threatAssessment,
-    onFetchInterceptGeometry, onFetchThreatAssessment,
     isRecording, recordings, onStartRecording, onStopRecording, onDeleteRecording,
     replayState, onStartReplay, onPauseReplay, onResumeReplay, onStopReplay,
     showAdvanced, onToggleAdvanced,
-    wtaAlgorithms, assignments, onFetchAssignments,
-    environmentState, onFetchSensorTracks,
-    cooperativeState, onFetchCooperativeState, onCreateEngagementZone,
+    wtaAlgorithms, assignments,
+    environmentState,
+    cooperativeState, onCreateEngagementZone,
     mlStatus, onFetchMLStatus,
     swarmStatus, formationTypes, onFetchSwarmStatus, onConfigureSwarm, onSetSwarmFormation,
     hmtStatus, authorityLevels, pendingActions,
@@ -184,22 +184,8 @@ export function ControlPanel(props: ControlPanelProps) {
   const isRunning = state?.status === 'running';
 
   // ── Side-effects ──────────────────────────────────────────────
-  useEffect(() => {
-    if (!isRunning) return;
-    const interval = setInterval(() => {
-      onFetchInterceptGeometry();
-      onFetchThreatAssessment();
-      if (numTargets > 1) onFetchAssignments(selectedWTA);
-      if (onFetchSensorTracks) onFetchSensorTracks();
-      if (onFetchCooperativeState && enableCooperative) onFetchCooperativeState();
-      if (onFetchSwarmStatus && enableSwarm) onFetchSwarmStatus();
-      if (enableHmt) {
-        if (onFetchHMTStatus) onFetchHMTStatus();
-        if (onFetchPendingActions) onFetchPendingActions();
-      }
-    }, 200);
-    return () => clearInterval(interval);
-  }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative, onFetchSwarmStatus, enableSwarm, onFetchHMTStatus, onFetchPendingActions, enableHmt]);
+  // HUD data (geometry, threats, assignments, cooperative, swarm, HMT)
+  // now comes through WebSocket — no HTTP polling needed.
 
   useEffect(() => {
     const scenario = scenarios[selectedScenario];
@@ -224,21 +210,23 @@ export function ControlPanel(props: ControlPanelProps) {
   // ── Render ────────────────────────────────────────────────────
   return (
     <>
-      <MissionToolbar
-        connected={connected} isRunning={isRunning}
-        selectedScenario={selectedScenario} selectedGuidance={selectedGuidance}
-        navConstant={navConstant} selectedEvasion={selectedEvasion}
-        numInterceptors={numInterceptors} numTargets={numTargets} selectedWTA={selectedWTA}
-        scenarios={scenarios} guidanceLaws={guidanceLaws}
-        evasionTypes={evasionTypes} wtaAlgorithms={wtaAlgorithms}
-        onScenario={setSelectedScenario} onGuidance={setSelectedGuidance}
-        onNavConstant={setNavConstant} onEvasion={setSelectedEvasion}
-        onNumInterceptors={setNumInterceptors} onNumTargets={setNumTargets} onWTA={setSelectedWTA}
-        onLaunch={handleLaunch} onAbort={onStop}
-        isRecording={isRecording}
-        onToggleRecording={isRecording ? onStopRecording : onStartRecording}
-        showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced}
-      />
+      {!props.hideToolbar && (
+        <MissionToolbar
+          connected={connected} isRunning={isRunning}
+          selectedScenario={selectedScenario} selectedGuidance={selectedGuidance}
+          navConstant={navConstant} selectedEvasion={selectedEvasion}
+          numInterceptors={numInterceptors} numTargets={numTargets} selectedWTA={selectedWTA}
+          scenarios={scenarios} guidanceLaws={guidanceLaws}
+          evasionTypes={evasionTypes} wtaAlgorithms={wtaAlgorithms}
+          onScenario={setSelectedScenario} onGuidance={setSelectedGuidance}
+          onNavConstant={setNavConstant} onEvasion={setSelectedEvasion}
+          onNumInterceptors={setNumInterceptors} onNumTargets={setNumTargets} onWTA={setSelectedWTA}
+          onLaunch={handleLaunch} onAbort={onStop}
+          isRecording={isRecording}
+          onToggleRecording={isRecording ? onStopRecording : onStartRecording}
+          showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced}
+        />
+      )}
 
       <MissionStatusHUD
         state={state}

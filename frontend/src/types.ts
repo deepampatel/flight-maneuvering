@@ -375,6 +375,16 @@ export interface SimStateEvent {
   wave_info?: WaveInfo;
   // Phase 8: Multi-Layer Defense
   tewa?: TEWAState;
+  // Embedded HUD data (from WebSocket, avoids polling)
+  intercept_geometry?: {
+    num_targets: number;
+    num_interceptors: number;
+    geometries: InterceptGeometry[];
+  };
+  threat_assessment?: {
+    num_targets: number;
+    assessments: ThreatAssessment[];
+  };
 }
 
 // Launcher (Bogey) Types

@@ -3,7 +3,12 @@
  *
  * Each scenario maps to existing RunConfig options.
  * Difficulty scaling through entity count, evasion type, and par time.
+ *
+ * Battery/wave/area data mirrors the backend SCENARIOS dict so that
+ * the ScenarioBuilder can populate its UI from presets.
  */
+
+import type { BuilderBatteryConfig, BuilderWaveConfig, BuilderProtectedArea } from '../types';
 
 export interface NarrativeScenario {
   id: string;
@@ -29,6 +34,10 @@ export interface NarrativeScenario {
     windSpeed?: number;
     windDirection?: number;
     enableDrag?: boolean;
+    // Builder-compatible arrays (mirrors backend SCENARIOS dict)
+    batteries?: BuilderBatteryConfig[];
+    waves?: BuilderWaveConfig[];
+    protectedAreas?: BuilderProtectedArea[];
   };
   scoring: {
     parTime: number;
@@ -198,6 +207,9 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 3,
       numTargets: 3,
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Delta City', center: { x: -2000, y: 1000, z: 0 }, radius: 3000, priority: 1 },
+      ],
     },
     scoring: {
       parTime: 30,
@@ -224,6 +236,12 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 5,
+      batteries: [
+        { id: 'bat_1', name: 'Iron Dome Alpha', tier: 'iron_dome', position: { x: -500, y: 500, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 20, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Alpha City', center: { x: -2000, y: 500, z: 0 }, radius: 2500, priority: 1 },
+      ],
     },
     scoring: {
       parTime: 40,
@@ -250,6 +268,14 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 8,
+      batteries: [
+        { id: 'bat_1', name: 'Battery Alpha', tier: 'iron_dome', position: { x: 0, y: -500, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 20, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+        { id: 'bat_2', name: 'Battery Bravo', tier: 'iron_dome', position: { x: 0, y: 3500, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 20, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_bravo'] },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Bravo City', center: { x: -1000, y: -1000, z: 0 }, radius: 2500, priority: 1 },
+        { id: 'city_bravo', name: 'Charlie City', center: { x: -1000, y: 4000, z: 0 }, radius: 3000, priority: 2 },
+      ],
     },
     scoring: {
       parTime: 50,
@@ -276,6 +302,16 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 3,
+      batteries: [
+        { id: 'bat_1', name: 'Battery Alpha', tier: 'iron_dome', position: { x: -500, y: 500, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 20, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+      ],
+      waves: [
+        { id: 'wave_1', delay: 8, threat_type: 'grad', count: 4, spawn_bearing: 103, spawn_range: 9220, spawn_altitude: 100, spacing: 1500, salvo_interval: 0.8, decoy_fraction: 0 },
+        { id: 'wave_2', delay: 18, threat_type: 'qassam', count: 5, spawn_bearing: 83, spawn_range: 8559, spawn_altitude: 100, spacing: 1800, salvo_interval: 0.5, decoy_fraction: 0 },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Alpha City', center: { x: -2000, y: 500, z: 0 }, radius: 2500, priority: 1 },
+      ],
     },
     scoring: {
       parTime: 45,
@@ -302,6 +338,18 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 4,
+      batteries: [
+        { id: 'bat_1', name: 'Battery Alpha', tier: 'iron_dome', position: { x: 0, y: 0, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 10, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+      ],
+      waves: [
+        { id: 'wave_1', delay: 6, threat_type: 'grad', count: 5, spawn_bearing: 99, spawn_range: 9618, spawn_altitude: 100, spacing: 1200, salvo_interval: 0.6, decoy_fraction: 0 },
+        { id: 'wave_2', delay: 14, threat_type: 'qassam', count: 6, spawn_bearing: 80, spawn_range: 8631, spawn_altitude: 100, spacing: 1400, salvo_interval: 0.4, decoy_fraction: 0 },
+        { id: 'wave_3', delay: 22, threat_type: 'grad', count: 8, spawn_bearing: 90, spawn_range: 10000, spawn_altitude: 100, spacing: 1000, salvo_interval: 0.3, decoy_fraction: 0 },
+        { id: 'wave_4', delay: 32, threat_type: 'qassam', count: 10, spawn_bearing: 87, spawn_range: 9014, spawn_altitude: 100, spacing: 800, salvo_interval: 0.2, decoy_fraction: 0 },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Bravo City', center: { x: -1500, y: 0, z: 0 }, radius: 2500, priority: 1 },
+      ],
     },
     scoring: {
       parTime: 55,
@@ -329,6 +377,12 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 3,
+      batteries: [
+        { id: 'bat_1', name: "David's Sling Battery", tier: 'davids_sling', position: { x: 0, y: 0, z: 0 }, radar_range: 300000, radar_sector: 360, num_launchers: 2, missiles_per_launcher: 12, max_simultaneous: 4, min_range: 40000, max_range: 300000, launch_speed: 800, launch_elevation: 70, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Echo City', center: { x: -5000, y: 0, z: 0 }, radius: 4000, priority: 1 },
+      ],
     },
     scoring: {
       parTime: 40,
@@ -355,6 +409,20 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       navConstant: 4,
       numInterceptors: 0,
       numTargets: 4,
+      batteries: [
+        { id: 'bat_1', name: 'Iron Dome Alpha', tier: 'iron_dome', position: { x: 0, y: 0, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 3, missiles_per_launcher: 20, max_simultaneous: 6, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['city_alpha'] },
+        { id: 'bat_2', name: 'Iron Dome Bravo', tier: 'iron_dome', position: { x: 0, y: 5000, z: 0 }, radar_range: 70000, radar_sector: 360, num_launchers: 2, missiles_per_launcher: 20, max_simultaneous: 4, min_range: 4000, max_range: 70000, launch_speed: 250, launch_elevation: 80, min_altitude: 100, protected_area_ids: ['base_bravo'] },
+        { id: 'bat_3', name: "David's Sling", tier: 'davids_sling', position: { x: -1000, y: 2500, z: 0 }, radar_range: 300000, radar_sector: 360, num_launchers: 2, missiles_per_launcher: 12, max_simultaneous: 4, min_range: 40000, max_range: 300000, launch_speed: 800, launch_elevation: 65, min_altitude: 100, protected_area_ids: [] },
+      ],
+      waves: [
+        { id: 'wave_1', delay: 5, threat_type: 'cruise_missile', count: 3, spawn_bearing: 87, spawn_range: 50090, spawn_altitude: 8000, spacing: 4000, salvo_interval: 1.5, decoy_fraction: 0 },
+        { id: 'wave_2', delay: 12, threat_type: 'qassam', count: 5, spawn_bearing: 95, spawn_range: 12042, spawn_altitude: 100, spacing: 1500, salvo_interval: 0.5, decoy_fraction: 0 },
+        { id: 'wave_3', delay: 20, threat_type: 'grad', count: 4, spawn_bearing: 70, spawn_range: 14866, spawn_altitude: 100, spacing: 2000, salvo_interval: 0.6, decoy_fraction: 0 },
+      ],
+      protectedAreas: [
+        { id: 'city_alpha', name: 'Delta City', center: { x: -3000, y: 0, z: 0 }, radius: 5000, priority: 1 },
+        { id: 'base_bravo', name: 'Air Force Base', center: { x: -3000, y: 6000, z: 0 }, radius: 3000, priority: 2 },
+      ],
     },
     scoring: {
       parTime: 50,

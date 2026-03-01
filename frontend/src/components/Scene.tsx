@@ -20,8 +20,9 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Grid, Line, Text, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState, ProtectedArea, ImpactPrediction, BatteryState } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState, ProtectedArea, ImpactPrediction, BatteryState, BuilderBatteryConfig, BuilderProtectedArea } from '../types';
 import { MissionPlannerContent } from './MissionPlanner';
+import { PreviewBatteryPlatform, PreviewProtectedAreaDome } from './ScenePreview';
 import type { PlacementMode, PlannedEntity, PlannedZone } from './MissionPlanner';
 import { CameraController } from './CameraController';
 import type { CameraMode } from './CameraController';
@@ -1344,9 +1345,12 @@ interface SceneContentProps {
   replayProgress?: number;
   explosions?: ExplosionData[];
   onExplosionComplete?: (id: string) => void;
+  // Builder preview (shown before simulation starts)
+  previewBatteries?: BuilderBatteryConfig[];
+  previewProtectedAreas?: BuilderProtectedArea[];
 }
 
-function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers, cameraMode, selectedEntityId, onSelectEntity, replayProgress, explosions, onExplosionComplete }: SceneContentProps) {
+function SceneContent({ state, trails, interceptGeometry, assignments, currentWind, sensorTracks, cooperativeState, launchers, cameraMode, selectedEntityId, onSelectEntity, replayProgress, explosions, onExplosionComplete, previewBatteries, previewProtectedAreas }: SceneContentProps) {
   // Support multiple targets
   const targets = state?.entities.filter((e) => e.type === 'target') || [];
   const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
@@ -1439,7 +1443,15 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         entities={state?.entities || []}
       />
 
-      {/* Protected Area Domes - Phase 4 IPP */}
+      {/* Preview — builder-configured entities shown before simulation starts */}
+      {!state && previewProtectedAreas && previewProtectedAreas.map((area) => (
+        <PreviewProtectedAreaDome key={area.id} area={area} />
+      ))}
+      {!state && previewBatteries && previewBatteries.map((config) => (
+        <PreviewBatteryPlatform key={config.id} config={config} />
+      ))}
+
+      {/* Protected Area Domes - Phase 4 IPP (live) */}
       {state?.protected_areas && state.protected_areas.map((area) => (
         <ProtectedAreaDome key={area.id} area={area} />
       ))}
@@ -1449,19 +1461,19 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         <ImpactPointMarker key={pred.threat_id} prediction={pred as ImpactPrediction} />
       ))}
 
-      {/* Battery Platforms - Phase 5 */}
+      {/* Battery Platforms - Phase 5 (live) */}
       {state?.batteries && state.batteries.map((battery) => (
         <BatteryPlatform key={battery.id} battery={battery} />
       ))}
 
-      {/* All Targets */}
-      {targets.map((target, idx) => (
+      {/* All Targets — hide intercepted ones (explosion handles the visual) */}
+      {targets.filter(t => !interceptedTargetIds.has(t.id)).map((target, idx) => (
         <Target
           key={target.id}
           entity={target}
           trail={trails.get(target.id) || []}
           colorIndex={idx}
-          isIntercepted={interceptedTargetIds.has(target.id)}
+          isIntercepted={false}
           isSelected={selectedEntityId === target.id}
           onClick={() => onSelectEntity?.(selectedEntityId === target.id ? null : target.id)}
         />
@@ -1472,8 +1484,8 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         <Launcher key={launcher.id} launcher={launcher} />
       ))}
 
-      {/* All Interceptors — tier-specific colors for battery-launched interceptors */}
-      {interceptors.map((interceptor, idx) => {
+      {/* All Interceptors — hide intercepted ones, tier-specific colors for battery-launched */}
+      {interceptors.filter(i => !interceptedInterceptorIds.has(i.id)).map((interceptor, idx) => {
         const tierIdx = tierColorMap.get(interceptor.id);
         const colorIdx = tierIdx !== undefined ? tierIdx : idx;
         return (
@@ -1626,6 +1638,9 @@ interface SimulationSceneProps {
   showGrid?: boolean;
   snapToGrid?: boolean;
   onScenePlacement?: (type: 'battery' | 'protected_area', position: { x: number; y: number; z: number }) => void;
+  // Builder preview
+  previewBatteries?: BuilderBatteryConfig[];
+  previewProtectedAreas?: BuilderProtectedArea[];
 }
 
 export function SimulationScene({
@@ -1653,6 +1668,8 @@ export function SimulationScene({
   showGrid = false,
   snapToGrid = false,
   onScenePlacement,
+  previewBatteries,
+  previewProtectedAreas,
 }: SimulationSceneProps) {
   // Extract current wind from environment state if available
   const currentWind = useMemo(() => {
@@ -1745,8 +1762,24 @@ export function SimulationScene({
         }
       }
 
+      // Build set of intercepted entity IDs to freeze their trails
+      const deadIds = new Set<string>();
+      if (state.intercepted_pairs) {
+        for (const pair of state.intercepted_pairs) {
+          deadIds.add(pair[0]); // interceptor
+          deadIds.add(pair[1]); // target
+        }
+      }
+
       // Update trails for current entities
       for (const entity of state.entities) {
+        // Skip trail growth for intercepted entities — freeze at moment of intercept
+        if (deadIds.has(entity.id)) {
+          const existing = prevTrails.get(entity.id);
+          if (existing) newTrails.set(entity.id, existing);
+          continue;
+        }
+
         const pos = new THREE.Vector3(
           entity.position.x * SCALE,
           entity.position.z * SCALE,
@@ -1806,6 +1839,8 @@ export function SimulationScene({
         replayProgress={replayProgress}
         explosions={explosions}
         onExplosionComplete={handleExplosionComplete}
+        previewBatteries={previewBatteries}
+        previewProtectedAreas={previewProtectedAreas}
       />
 
       {/* Mission Planner overlay */}

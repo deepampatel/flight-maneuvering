@@ -1,191 +1,104 @@
-# INTERCEPT
+# Intercept
 
-**Iron Dome-class multi-layer air defense simulation.**
+A real-time air defense simulation I built to understand how missile guidance, threat evaluation, and multi-layer defense systems actually work — not from textbooks, but by implementing the math and watching it play out in 3D.
 
-Real-time 3D visualization of missile guidance, interception physics, and tactical C2 — from proportional navigation to swarm coordination to human-machine teaming.
+<p align="center">
+  <img src="docs/screenshot.png" width="70%" alt="Dashboard">
+  <br>
+  <img src="docs/builder.png" width="25%" alt="Scenario Builder">
+</p>
 
-![Intercept Simulation](docs/screenshot.png)
+## Why I Built This
 
-**React** + **Three.js** | **Python** + **FastAPI** | **WebSocket @ 50Hz** | **Docker**
+I wanted to understand the engineering behind systems like Iron Dome. Not the politics — the math. How does proportional navigation actually guide a missile? What happens when you throw 20 threats at a defense system simultaneously? How do you assign interceptors to targets optimally when you have limited ammunition?
 
----
+Reading papers and textbooks gave me formulas. Building this gave me intuition.
+
+## What You Can Learn
+
+- **Guidance laws** — Proportional navigation drives the line-of-sight rate to zero. Pure pursuit curves behind a turning target and fails. Augmented PN accounts for target acceleration. Tweak the navigation constant (N=3 vs N=5) and see why it matters.
+- **The assignment problem** — With 1 interceptor and 1 target, guidance is the whole challenge. With 4 interceptors and 6 targets, *who shoots what* matters as much as *how*. Hungarian algorithm gives optimal assignment. Greedy is faster but worse. You can see the tradeoff.
+- **Defense in depth** — Short-range (Iron Dome), medium-range (David's Sling), and long-range (Arrow) tiers each have different engagement envelopes. TEWA (Threat Evaluation and Weapon Assignment) decides which layer handles which threat.
+- **What breaks under pressure** — Crank up the threat count. Add evasive maneuvers. Introduce sensor noise. Watch intercept rates drop and understand exactly why.
 
 ## Quick Start
-
-### One-command dev (recommended)
-
-```bash
-git clone https://github.com/yourusername/intercept.git
-cd intercept
-npm install          # installs concurrently
-npm run setup        # installs frontend deps
-npm run dev          # starts backend + frontend
-```
-
-Open **http://localhost:5173**. Select a scenario. Click **LAUNCH**.
-
-### Docker (single port)
 
 ```bash
 docker compose up --build
 ```
 
-Open **http://localhost:8000**. Everything served from one container.
+Open **http://localhost:8000**.
 
-### Manual (two terminals)
+## How to Use
 
-```bash
-# Terminal 1: Backend
-cd backend
-uv sync  # or: pip install -e .
-python server.py
+1. **Pick a scenario** — The Scenario Builder (left panel) has presets ranging from a single head-on intercept to full saturation attacks. Start with "First Contact" to see the basics.
 
-# Terminal 2: Frontend
-cd frontend
-npm install
-npm run dev
-```
+2. **Or build your own** — Add defense batteries (pick tier, position, ammo count), configure threat waves (type, count, timing, direction), and place protected areas on the map.
 
----
+3. **Hit Launch** — The simulation runs at 50Hz. You'll see interceptors launch, guidance corrections in real-time, and intercept/miss outcomes with explosion effects.
 
-## What You Can Do
+4. **Explore while it runs** — Switch camera modes (keys 1-4), open the Analysis panel for Monte Carlo batch runs or engagement envelope heatmaps, and check the telemetry HUD at the bottom for live intercept geometry.
 
-**Watch guidance laws work (or fail)**
-- Pure pursuit curves hopelessly behind a turning target
-- Proportional navigation drives LOS rate to zero
-- Augmented PN compensates for target acceleration
-- See exactly why N=3 vs N=5 matters
+## How It Works
 
-**Break things intentionally**
-- Crank up sensor noise until tracks diverge
-- Add wind and watch trajectories bend
-- Enable random jinking and see intercept rates collapse
-- Find the edges of the engagement envelope
+The backend runs a fixed-timestep physics simulation at 50Hz. Each tick: targets move (with optional evasion maneuvers), guidance laws compute interceptor acceleration commands, environment effects (wind, drag) are applied, and interception is checked using closest-point-of-approach with a probabilistic kill model.
 
-**Analyze statistically**
-- Monte Carlo batch runs (100+ iterations) for Pk estimation
-- Engagement envelope heatmaps across range and bearing
-- Record and replay any engagement
+State streams to the frontend over WebSocket. The React/Three.js frontend renders entities, trails, and effects in real-time. No polling — everything is push-based.
 
----
+## Stack
 
-## Architecture
+| | |
+|---|---|
+| Frontend | React, Three.js (React Three Fiber), TypeScript, Vite |
+| Backend | Python, FastAPI, WebSocket, NumPy/SciPy |
+| Deploy | Docker — single container, port 8000 |
+
+## Project Structure
 
 ```
-intercept/
-├── backend/
-│   ├── sim/
-│   │   ├── engine.py          # Core tick loop (50Hz)
-│   │   ├── guidance.py        # PN, APN, pursuit, ML
-│   │   ├── evasion.py         # Target maneuvers
-│   │   ├── sensor.py          # Detection + Kalman filter
-│   │   ├── fusion.py          # Multi-sensor fusion
-│   │   ├── assignment.py      # WTA: Greedy, Hungarian, Threat-Priority
-│   │   ├── threat.py          # Threat scoring (0-100)
-│   │   ├── launcher.py        # Autonomous launch platforms
-│   │   ├── swarm.py           # Formation control + Reynolds flocking
-│   │   ├── hmt.py             # Human-machine teaming
-│   │   ├── environment.py     # Wind, drag, terrain
-│   │   ├── monte_carlo.py     # Statistical analysis
-│   │   └── ml/                # ONNX neural network inference
-│   └── server.py              # FastAPI + WebSocket + static serving
-├── frontend/
-│   └── src/
-│       ├── components/
-│       │   ├── Scene.tsx             # Three.js 3D visualization
-│       │   ├── MissionToolbar.tsx    # Scenario + guidance controls
-│       │   ├── MissionStatusHUD.tsx  # Real-time mission panels
-│       │   ├── AdvancedPanel.tsx     # Tabbed analysis sidebar
-│       │   ├── SplashScreen.tsx      # Cinematic loading screen
-│       │   ├── WelcomeModal.tsx      # First-visit onboarding
-│       │   └── panels/              # Analysis, Recordings, ML, etc.
-│       └── hooks/
-│           ├── useSimulation.ts      # WebSocket + REST integration
-│           └── useKeyboardShortcuts.ts
-├── docker-compose.yml
-├── Dockerfile
-└── package.json                      # Unified dev commands
+backend/
+  server.py              # FastAPI + WebSocket + static serving
+  sim/
+    engine.py            # Core simulation loop (50Hz fixed timestep)
+    entities.py          # Missile and target physics
+    guidance.py          # PN, APN, pure pursuit
+    evasion.py           # Barrel roll, S-turn, jinking, weave
+    intercept.py         # Intercept geometry (LOS rate, closing velocity, CPA)
+    threat.py            # Threat scoring and prioritization
+    assignment.py        # Weapon-target assignment (Hungarian, greedy, auction)
+    battery.py           # Defense battery system
+    tewa.py              # Threat Evaluation & Weapon Assignment controller
+    waves.py             # Threat wave spawning and scheduling
+    ipp.py               # Impact point prediction and Pk model
+    environment.py       # Wind fields, drag
+    monte_carlo.py       # Batch statistical analysis
+frontend/
+  src/
+    App.tsx              # Main layout and state management
+    components/
+      Scene.tsx          # Three.js 3D visualization
+      ScenarioBuilder.tsx # Scenario configuration UI
+    hooks/
+      useSimulation.ts   # WebSocket connection and API integration
+    types.ts             # Shared TypeScript interfaces
 ```
-
----
-
-## Simulation Systems
-
-| System | Description |
-|--------|-------------|
-| **Guidance** | Pure Pursuit, Proportional Nav, Augmented PN, ML Policy |
-| **Evasion** | Constant-G, weave, barrel roll, random jink |
-| **Sensors** | Range/angle noise, detection probability, 6-state Kalman |
-| **Multi-Target** | Hungarian, Greedy, Threat-Priority WTA |
-| **Launch Platforms** | Autonomous detection + lead prediction + magazine |
-| **Environment** | Wind fields, gusts, altitude-dependent drag |
-| **Swarm** | V, echelon, wedge, line abreast, diamond formations |
-| **HMT** | Full Auto / Human-on-Loop / Human-in-Loop / Manual |
-| **Analysis** | Monte Carlo (100+ runs), engagement envelope, record/replay |
-
----
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Space` | Launch / Stop simulation |
-| `Esc` | Abort simulation |
-| `R` | Toggle recording |
-| `1-4` | Camera modes (Free / Chase / Tactical / Cinematic) |
-| `A` | Toggle advanced panel |
-| `?` | Show shortcuts |
-
----
-
-## NPM Scripts
-
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start backend + frontend concurrently |
-| `npm run build` | Production build (frontend) |
-| `npm run docker` | Docker compose up |
-| `npm run typecheck` | TypeScript type check |
-| `npm run lint` | ESLint |
-
----
-
-## Tech Stack
-
-- **Frontend**: React 19, TypeScript, Three.js / React Three Fiber, Vite
-- **Backend**: Python 3.11+, FastAPI, NumPy, SciPy
-- **Infrastructure**: Docker, WebSocket (real-time 50Hz state streaming)
-- **Optional**: ONNX Runtime (ML inference)
-
----
-
-## Key Concepts
-
-### Proportional Navigation
-The core insight: if the line-of-sight angle to a target isn't changing, you're on a collision course. PN commands acceleration proportional to how fast that angle *is* changing, driving it to zero.
-
-```
-a = N x Vc x LOS_rate
-```
-
-N is the navigation constant (typically 3-5). Higher = more aggressive. Too high = oscillation.
-
-### The Assignment Problem
-With 1 interceptor and 1 target, guidance is the whole problem. With 4 interceptors and 6 targets, *who shoots what* matters as much as *how*. Hungarian algorithm gives optimal assignment but assumes you know costs.
-
-### Human-Machine Teaming
-Full autonomy is easy. Full manual is easy. The middle ground — AI acts, human overrides — requires trust calibration, workload management, and carefully designed interaction patterns.
-
----
+| Space | Launch / Stop |
+| Esc | Abort |
+| R | Toggle recording |
+| 1-4 | Camera modes (Free / Chase / Tactical / Cinematic) |
+| A | Analysis panel |
 
 ## References
 
-- Zarchan, *Tactical and Strategic Missile Guidance*
+- Zarchan, *Tactical and Strategic Missile Guidance* — the bible for proportional navigation
 - Siouris, *Missile Guidance and Control Systems*
-- Various AIAA papers on cooperative engagement
-
----
+- Kuhn, *The Hungarian Method for the Assignment Problem*
 
 ## License
 
-MIT. Use it, learn from it, build on it.
+MIT

@@ -15,7 +15,6 @@ import { ControlPanel } from './components/ControlPanel';
 import { HMTToast } from './components/HMTToast';
 import { LaunchEventToast } from './components/LaunchEventToast';
 import { MissionPlannerPanel } from './components/MissionPlannerPanel';
-import { StatusBar } from './components/StatusBar';
 import { TelemetryHUD } from './components/TelemetryHUD';
 import { CameraModeSelector } from './components/CameraController';
 import type { CameraMode } from './components/CameraController';
@@ -108,6 +107,7 @@ function App() {
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(true);
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState<CameraMode>('free');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [showRadar, setShowRadar] = useState(false);
@@ -155,6 +155,9 @@ function App() {
   const handlePlacementConsumed = useCallback(() => {
     setScenePlacement(null);
   }, []);
+
+  // Builder state for 3D preview (batteries/areas shown before launch)
+  const [builderPreview, setBuilderPreview] = useState<ScenarioBuilderState | null>(null);
 
   // Keyboard shortcuts
   const isRunning = state?.status === 'running';
@@ -298,49 +301,44 @@ function App() {
   const handleBuilderLaunch = useCallback(async (builderState: ScenarioBuilderState, presetScenario: string | null) => {
     audio.playLaunch();
 
-    const customBatteries = builderState.batteries.length > 0
-      ? builderState.batteries.map(b => ({
-          id: b.id,
-          name: b.name,
-          tier: b.tier,
-          position: b.position,
-          radar_range: b.radar_range,
-          radar_sector: b.radar_sector,
-          num_launchers: b.num_launchers,
-          missiles_per_launcher: b.missiles_per_launcher,
-          max_simultaneous: b.max_simultaneous,
-          min_range: b.min_range,
-          max_range: b.max_range,
-          launch_speed: b.launch_speed,
-          launch_elevation: b.launch_elevation,
-          min_altitude: b.min_altitude,
-          protected_area_ids: b.protected_area_ids,
-        }))
-      : undefined;
+    // Always send explicit arrays — "what you see in the builder = what runs"
+    const customBatteries = builderState.batteries.map(b => ({
+      id: b.id,
+      name: b.name,
+      tier: b.tier,
+      position: b.position,
+      radar_range: b.radar_range,
+      radar_sector: b.radar_sector,
+      num_launchers: b.num_launchers,
+      missiles_per_launcher: b.missiles_per_launcher,
+      max_simultaneous: b.max_simultaneous,
+      min_range: b.min_range,
+      max_range: b.max_range,
+      launch_speed: b.launch_speed,
+      launch_elevation: b.launch_elevation,
+      min_altitude: b.min_altitude,
+      protected_area_ids: b.protected_area_ids,
+    }));
 
-    const customWaves = builderState.waves.length > 0
-      ? builderState.waves.map(w => ({
-          delay: w.delay,
-          threat_type: w.threat_type,
-          count: w.count,
-          spawn_bearing: w.spawn_bearing,
-          spawn_range: w.spawn_range,
-          spawn_altitude: w.spawn_altitude,
-          spacing: w.spacing,
-          salvo_interval: w.salvo_interval,
-          decoy_fraction: w.decoy_fraction,
-        }))
-      : undefined;
+    const customWaves = builderState.waves.map(w => ({
+      delay: w.delay,
+      threat_type: w.threat_type,
+      count: w.count,
+      spawn_bearing: w.spawn_bearing,
+      spawn_range: w.spawn_range,
+      spawn_altitude: w.spawn_altitude,
+      spacing: w.spacing,
+      salvo_interval: w.salvo_interval,
+      decoy_fraction: w.decoy_fraction,
+    }));
 
-    const customProtectedAreas = builderState.protectedAreas.length > 0
-      ? builderState.protectedAreas.map(a => ({
-          id: a.id,
-          name: a.name,
-          center: a.center,
-          radius: a.radius,
-          priority: a.priority,
-        }))
-      : undefined;
+    const customProtectedAreas = builderState.protectedAreas.map(a => ({
+      id: a.id,
+      name: a.name,
+      center: a.center,
+      radius: a.radius,
+      priority: a.priority,
+    }));
 
     await startRun({
       scenario: presetScenario || 'head_on',
@@ -446,97 +444,128 @@ function App() {
 
       <header className="app-header">
         <div className="header-left">
-          <div className="header-brand">
-            <h1>Intercept</h1>
-            <span className="header-subtitle">Air Defense Simulation</span>
-          </div>
+          <h1 className="header-brand-text">Intercept</h1>
         </div>
-        <div className="header-center">
-          <ControlPanel
-            connected={connected}
-            state={state}
-            scenarios={scenarios}
-            guidanceLaws={guidanceLaws}
-            evasionTypes={evasionTypes}
-            onStart={handleLaunch}
-            onStop={stopRun}
-            onRunMonteCarlo={runMonteCarlo}
-            onRunEnvelope={runEnvelopeAnalysis}
-            monteCarloLoading={monteCarloLoading}
-            envelopeLoading={envelopeLoading}
-            interceptGeometry={interceptGeometry}
-            threatAssessment={threatAssessment}
-            onFetchInterceptGeometry={fetchInterceptGeometry}
-            onFetchThreatAssessment={fetchThreatAssessment}
-            isRecording={isRecording}
-            recordings={recordings}
-            onStartRecording={startRecording}
-            onStopRecording={stopRecording}
-            onDeleteRecording={deleteRecording}
-            replayState={replayState}
-            onStartReplay={startReplay}
-            onPauseReplay={pauseReplay}
-            onResumeReplay={resumeReplay}
-            onStopReplay={stopReplay}
-            showAdvanced={showAdvanced}
-            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
-            //
-            wtaAlgorithms={wtaAlgorithms}
-            assignments={assignments}
-            onFetchAssignments={fetchAssignments}
-            //
-            environmentState={environmentState}
-            onFetchSensorTracks={fetchSensorTracks}
-            // Cooperative Engagement
-            cooperativeState={cooperativeState}
-            onFetchCooperativeState={fetchCooperativeState}
-            onCreateEngagementZone={createEngagementZone}
-            onDeleteEngagementZone={deleteEngagementZone}
-            onAssignInterceptorToZone={assignInterceptorToZone}
-            onRequestHandoff={requestHandoff}
-            // Mission Planner
-            plannerMode={missionPlanner.mode}
-            onSetPlannerMode={(mode: string) => missionPlanner.setMode(mode as 'view' | 'interceptor' | 'target' | 'launcher' | 'zone')}
-            plannedEntities={missionPlanner.plannedEntities}
-            plannedZones={missionPlanner.plannedZones}
-            onClearPlanner={missionPlanner.clearAll}
-            onRemovePlannedEntity={missionPlanner.removeEntity}
-            // ML
-            mlStatus={mlStatus}
-            onFetchMLStatus={fetchMLStatus}
-            // Swarm
-            swarmStatus={swarmStatus}
-            formationTypes={formationTypes}
-            onFetchSwarmStatus={fetchSwarmStatus}
-            onConfigureSwarm={configureSwarm}
-            onSetSwarmFormation={setSwarmFormation}
-            // HMT
-            hmtStatus={hmtStatus}
-            authorityLevels={authorityLevels}
-            pendingActions={pendingActions}
-            onFetchHMTStatus={fetchHMTStatus}
-            onFetchPendingActions={fetchPendingActions}
-            onApproveAction={approveAction}
-            onRejectAction={rejectAction}
-            onSetAuthorityLevel={setAuthorityLevel}
-            onConfigureHMT={configureHMT}
-          />
+        <div className="header-toggles">
+          <button
+            className={`header-toggle-btn ${builderOpen ? 'active' : ''}`}
+            onClick={() => setBuilderOpen(p => !p)}
+            title="Scenario Builder (B)"
+          >
+            <svg className="toggle-icon" viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+              <path d="M1 3h14v1.5H1zm0 4h14v1.5H1zm0 4h10v1.5H1z"/>
+            </svg>
+            <span className="toggle-label">Builder</span>
+          </button>
+          <button
+            className={`header-toggle-btn ${plannerOpen ? 'active' : ''}`}
+            onClick={() => setPlannerOpen(p => !p)}
+            title="Mission Planner (P)"
+          >
+            <svg className="toggle-icon" viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+              <path d="M8 1l2 5h5l-4 3.5 1.5 5L8 11.5 3.5 14.5 5 9.5 1 6h5z"/>
+            </svg>
+            <span className="toggle-label">Planner</span>
+          </button>
+          <button
+            className={`header-toggle-btn ${showAdvanced ? 'active' : ''}`}
+            onClick={() => setShowAdvanced(p => !p)}
+            title="Analysis Panel (A)"
+          >
+            <svg className="toggle-icon" viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+              <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zM7.25 4v5h1.5V4h-1.5zM7.25 10.5v1.5h1.5v-1.5h-1.5z"/>
+            </svg>
+            <span className="toggle-label">Analysis</span>
+          </button>
+        </div>
+        <div className="header-sim-status">
+          {isRunning && (
+            <>
+              <span className="sim-status-chip">T+{(state?.sim_time || 0).toFixed(1)}s</span>
+              <span className="sim-status-chip">{state?.entities?.length || 0} entities</span>
+              <span className={`sim-status-chip status-${(state?.status || 'idle').toLowerCase()}`}>
+                {(state?.status || 'IDLE').toUpperCase()}
+              </span>
+            </>
+          )}
         </div>
         <div className="header-right">
-          <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
-            <span className="status-dot" />
-            {connected ? 'Online' : 'Offline'}
-          </div>
-          <span className="header-version">v2.0</span>
+          {isRecording && <span className="header-rec-badge">REC</span>}
+          <button className="header-icon-btn" onClick={audio.toggleMute}
+            title={audio.muted ? 'Unmute audio' : 'Mute audio'}>
+            {audio.muted ? '\u{1F507}' : '\u{1F50A}'}
+          </button>
+          <button className="header-icon-btn" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)">
+            ?
+          </button>
+          <div className={`connection-dot ${connected ? 'online' : 'offline'}`}
+            title={connected ? 'Connected' : 'Disconnected'} />
         </div>
       </header>
 
-      <StatusBar
-        state={state}
+      {/* ControlPanel — hidden toolbar, keeps polling + MissionStatusHUD + AdvancedPanel */}
+      <ControlPanel
+        hideToolbar
         connected={connected}
+        state={state}
+        scenarios={scenarios}
+        guidanceLaws={guidanceLaws}
+        evasionTypes={evasionTypes}
+        onStart={handleLaunch}
+        onStop={stopRun}
+        onRunMonteCarlo={runMonteCarlo}
+        onRunEnvelope={runEnvelopeAnalysis}
+        monteCarloLoading={monteCarloLoading}
+        envelopeLoading={envelopeLoading}
+        interceptGeometry={interceptGeometry}
+        threatAssessment={threatAssessment}
+        onFetchInterceptGeometry={fetchInterceptGeometry}
+        onFetchThreatAssessment={fetchThreatAssessment}
         isRecording={isRecording}
-        muted={audio.muted}
-        onToggleMute={audio.toggleMute}
+        recordings={recordings}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        onDeleteRecording={deleteRecording}
+        replayState={replayState}
+        onStartReplay={startReplay}
+        onPauseReplay={pauseReplay}
+        onResumeReplay={resumeReplay}
+        onStopReplay={stopReplay}
+        showAdvanced={showAdvanced}
+        onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+        wtaAlgorithms={wtaAlgorithms}
+        assignments={assignments}
+        onFetchAssignments={fetchAssignments}
+        environmentState={environmentState}
+        onFetchSensorTracks={fetchSensorTracks}
+        cooperativeState={cooperativeState}
+        onFetchCooperativeState={fetchCooperativeState}
+        onCreateEngagementZone={createEngagementZone}
+        onDeleteEngagementZone={deleteEngagementZone}
+        onAssignInterceptorToZone={assignInterceptorToZone}
+        onRequestHandoff={requestHandoff}
+        plannerMode={missionPlanner.mode}
+        onSetPlannerMode={(mode: string) => missionPlanner.setMode(mode as 'view' | 'interceptor' | 'target' | 'launcher' | 'zone')}
+        plannedEntities={missionPlanner.plannedEntities}
+        plannedZones={missionPlanner.plannedZones}
+        onClearPlanner={missionPlanner.clearAll}
+        onRemovePlannedEntity={missionPlanner.removeEntity}
+        mlStatus={mlStatus}
+        onFetchMLStatus={fetchMLStatus}
+        swarmStatus={swarmStatus}
+        formationTypes={formationTypes}
+        onFetchSwarmStatus={fetchSwarmStatus}
+        onConfigureSwarm={configureSwarm}
+        onSetSwarmFormation={setSwarmFormation}
+        hmtStatus={hmtStatus}
+        authorityLevels={authorityLevels}
+        pendingActions={pendingActions}
+        onFetchHMTStatus={fetchHMTStatus}
+        onFetchPendingActions={fetchPendingActions}
+        onApproveAction={approveAction}
+        onRejectAction={rejectAction}
+        onSetAuthorityLevel={setAuthorityLevel}
+        onConfigureHMT={configureHMT}
       />
 
       {/* Scenario Builder Drawer */}
@@ -552,6 +581,7 @@ function App() {
         onRequestPlacement={handleRequestPlacement}
         placementResult={scenePlacement}
         onPlacementConsumed={handlePlacementConsumed}
+        onStateChange={setBuilderPreview}
       />
 
       {/* HMT Toast - Floating notification for pending actions */}
@@ -569,7 +599,7 @@ function App() {
       />
 
       <main className="app-main">
-        <div className={`scene-container ${!isRunning && !isReplayActive ? 'with-planner' : ''}`}>
+        <div className={`scene-container ${!isRunning && !isReplayActive && plannerOpen ? 'with-planner' : ''}`}>
           <SimulationScene
             state={state}
             interceptGeometry={interceptGeometry}
@@ -595,6 +625,8 @@ function App() {
             showGrid={missionPlanner.showGrid}
             snapToGrid={missionPlanner.snapToGrid}
             onScenePlacement={handleScenePlacement}
+            previewBatteries={!isRunning ? builderPreview?.batteries : undefined}
+            previewProtectedAreas={!isRunning ? builderPreview?.protectedAreas : undefined}
           />
 
           {/* Telemetry HUD overlay on scene */}
@@ -661,8 +693,8 @@ function App() {
       {/* Engagement Timeline — bottom strip */}
       {isRunning && <EngagementTimeline state={state} />}
 
-      {/* Mission Planner Sidebar - shown when not running and not in replay */}
-      {!isRunning && !isReplayActive && (
+      {/* Mission Planner Sidebar - toggleable via header */}
+      {!isRunning && !isReplayActive && plannerOpen && (
         <MissionPlannerPanel
           mode={missionPlanner.mode}
           onSetMode={missionPlanner.setMode}

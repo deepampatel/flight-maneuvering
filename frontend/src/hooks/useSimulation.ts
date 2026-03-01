@@ -389,6 +389,13 @@ export function useSimulation(): UseSimulationReturn {
           if (data.launchers) {
             setLaunchers(data.launchers);
           }
+          // Extract HUD data embedded in WebSocket (avoids HTTP polling)
+          if (data.intercept_geometry?.geometries) {
+            setInterceptGeometry(data.intercept_geometry.geometries);
+          }
+          if (data.threat_assessment?.assessments) {
+            setThreatAssessment(data.threat_assessment.assessments);
+          }
         } else if (data.type === 'complete') {
           console.log('Simulation complete:', data.result);
         }

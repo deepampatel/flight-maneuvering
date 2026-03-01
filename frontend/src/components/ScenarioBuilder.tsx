@@ -34,6 +34,7 @@ interface ScenarioBuilderProps {
   onRequestPlacement?: (type: 'battery' | 'protected_area') => void;
   placementResult?: { type: 'battery' | 'protected_area'; position: { x: number; y: number; z: number } } | null;
   onPlacementConsumed?: () => void;
+  onStateChange?: (state: ScenarioBuilderState) => void;
 }
 
 const DEFAULT_STATE: ScenarioBuilderState = {
@@ -66,6 +67,7 @@ export function ScenarioBuilder({
   open, onToggle, isRunning, connected,
   isRecording, onLaunch, onStop, onToggleRecording,
   onRequestPlacement, placementResult, onPlacementConsumed,
+  onStateChange,
 }: ScenarioBuilderProps) {
   const [state, setState] = useState<ScenarioBuilderState>(DEFAULT_STATE);
   const [activePreset, setActivePreset] = useState<string | null>('first-contact');
@@ -95,6 +97,11 @@ export function ScenarioBuilder({
     onPlacementConsumed();
   }, [placementResult, onPlacementConsumed, state.batteries.length]);
 
+  // Report state changes for 3D scene preview
+  useEffect(() => {
+    onStateChange?.(state);
+  }, [state, onStateChange]);
+
   const toggleSection = (id: SectionId) => {
     setExpandedSections((prev) => {
       const next = new Set(prev);
@@ -113,6 +120,8 @@ export function ScenarioBuilder({
     }
     setActivePreset(scenario.id);
     setPresetScenarioId(scenario.config.scenario);
+    // Generate fresh IDs so React keys work and user can add/remove freely
+    const freshId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setState({
       ...DEFAULT_STATE,
       guidance: scenario.config.guidance,
@@ -126,17 +135,25 @@ export function ScenarioBuilder({
       enableDrag: scenario.config.enableDrag || false,
       windSpeed: scenario.config.windSpeed || 0,
       windDirection: scenario.config.windDirection || 0,
+      // Populate arrays from preset (mirrors backend SCENARIOS dict)
+      batteries: (scenario.config.batteries || []).map(b => ({ ...b, id: `bat_${freshId()}` })),
+      waves: (scenario.config.waves || []).map(w => ({ ...w, id: `wave_${freshId()}` })),
+      protectedAreas: (scenario.config.protectedAreas || []).map(a => ({ ...a, id: `area_${freshId()}` })),
     });
   }, []);
 
-  const updateField = useCallback((field: string, value: string | number | boolean) => {
-    setState((prev) => ({ ...prev, [field]: value }));
-    // When any setting changes, clear preset since we're customizing
+  // Clear visual preset badge when user customizes, but keep presetScenarioId
+  // (needed for backend target spawning logic)
+  const clearPresetBadge = useCallback(() => {
     if (activePreset !== null) {
       setActivePreset(null);
-      setPresetScenarioId(null);
     }
   }, [activePreset]);
+
+  const updateField = useCallback((field: string, value: string | number | boolean) => {
+    setState((prev) => ({ ...prev, [field]: value }));
+    clearPresetBadge();
+  }, [clearPresetBadge]);
 
   const handleLaunch = () => {
     onLaunch(state, presetScenarioId);
@@ -182,7 +199,7 @@ export function ScenarioBuilder({
               <div className="section-content">
                 <DefenseLayerEditor
                   batteries={state.batteries}
-                  onChange={(batteries: BuilderBatteryConfig[]) => setState((s) => ({ ...s, batteries }))}
+                  onChange={(batteries: BuilderBatteryConfig[]) => { setState((s) => ({ ...s, batteries })); clearPresetBadge(); }}
                   disabled={isRunning}
                 />
                 {!isRunning && onRequestPlacement && (
@@ -210,7 +227,7 @@ export function ScenarioBuilder({
               <div className="section-content">
                 <ThreatWaveEditor
                   waves={state.waves}
-                  onChange={(waves: BuilderWaveConfig[]) => setState((s) => ({ ...s, waves }))}
+                  onChange={(waves: BuilderWaveConfig[]) => { setState((s) => ({ ...s, waves })); clearPresetBadge(); }}
                   disabled={isRunning}
                 />
               </div>
@@ -230,7 +247,7 @@ export function ScenarioBuilder({
               <div className="section-content">
                 <ProtectedAreaEditor
                   areas={state.protectedAreas}
-                  onChange={(protectedAreas: BuilderProtectedArea[]) => setState((s) => ({ ...s, protectedAreas }))}
+                  onChange={(protectedAreas: BuilderProtectedArea[]) => { setState((s) => ({ ...s, protectedAreas })); clearPresetBadge(); }}
                   disabled={isRunning}
                 />
                 {!isRunning && onRequestPlacement && (
@@ -298,9 +315,12 @@ export function ScenarioBuilder({
 
         {/* Action bar */}
         <div className="builder-actions">
+          {!connected && !isRunning && (
+            <div className="builder-connection-hint">Connecting to backend...</div>
+          )}
           {!isRunning ? (
             <button className="builder-launch-btn" onClick={handleLaunch} disabled={!connected}>
-              Launch
+              {connected ? 'Launch' : 'Waiting...'}
             </button>
           ) : (
             <button className="builder-stop-btn" onClick={onStop}>

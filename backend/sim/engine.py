@@ -41,6 +41,8 @@ from .battery import Battery, BatteryConfig, create_iron_dome_battery
 from .waves import WaveManager, ThreatWave
 from .decoy import deploy_decoys, classify_threat, DecoyConfig
 from .tewa import TEWAController, DefenseTier
+from .intercept import compute_all_geometries_multi
+from .threat import assess_all_threats
 
 # Optional subsystem imports (features disabled by default)
 try:
@@ -104,7 +106,7 @@ class SimConfig:
     dt: float = 0.02            # Timestep (50 Hz)
     max_time: float = 60.0      # Max sim duration (seconds)
     kill_radius: float = 150.0  # Intercept success radius (meters) - proximity fuse
-    lethal_radius: float = 20.0 # Warhead blast/fragmentation radius for Pk model
+    lethal_radius: float = 100.0 # Warhead blast/fragmentation radius for Pk model
     real_time: bool = True      # Try to match wall-clock time
 
     # Environmental effects
@@ -189,6 +191,11 @@ class SimState:
     # Wave system (Phase 6)
     wave_manager: Optional['WaveManager'] = None
     decoy_tracking: Dict[str, float] = field(default_factory=dict)  # entity_id -> first_seen_time
+
+    # Cached HUD data (computed every N ticks, included in WebSocket)
+    _cached_geometries: Optional[list] = field(default=None, repr=False)
+    _cached_threat_assessments: Optional[list] = field(default=None, repr=False)
+
     engagement_stats: Dict[str, int] = field(default_factory=lambda: {
         "total_threats": 0,
         "threats_detected": 0,
@@ -212,6 +219,26 @@ class SimState:
     def interceptor(self) -> Entity:
         """Get first interceptor (for backward compatibility)."""
         return self.interceptors[0] if self.interceptors else None
+
+    def update_hud_cache(self) -> None:
+        """Compute intercept geometry and threat assessment, cache for WS broadcast."""
+        if not self.interceptors or not self.targets:
+            self._cached_geometries = None
+            self._cached_threat_assessments = None
+            return
+        try:
+            geos = compute_all_geometries_multi(self.interceptors, self.targets)
+            self._cached_geometries = [g.to_dict() for g in geos]
+
+            assessments = []
+            for interceptor in self.interceptors:
+                # Filter geometries for this interceptor
+                i_geos = [g for g in geos if g.interceptor_id == interceptor.id]
+                assessment = assess_all_threats(interceptor, self.targets, i_geos)
+                assessments.append(assessment.to_dict())
+            self._cached_threat_assessments = assessments
+        except Exception:
+            pass  # Don't crash the sim if HUD computation fails
 
     def to_event(self, assignments: Optional['AssignmentResult'] = None) -> dict:
         """Convert to event for transmission."""
@@ -315,6 +342,19 @@ class SimState:
         # Include battery states
         if self.batteries:
             event["batteries"] = [b.to_state_dict() for b in self.batteries]
+
+        # Include cached HUD data (geometry + threat assessment)
+        if self._cached_geometries is not None:
+            event["intercept_geometry"] = {
+                "num_targets": len(self.targets),
+                "num_interceptors": len(self.interceptors),
+                "geometries": self._cached_geometries,
+            }
+        if self._cached_threat_assessments is not None:
+            event["threat_assessment"] = {
+                "num_targets": len(self.targets),
+                "assessments": self._cached_threat_assessments,
+            }
 
         # Include engagement stats (Phase 6)
         if self.engagement_stats:
@@ -770,15 +810,31 @@ class SimEngine:
         self.state.miss_distance = min_miss_distance
 
         # Check intercept (any interceptor hits any target) — probabilistic Pk model
+        # Uses closest-point-of-approach (CPA) over the tick to prevent tunneling
         import random as _random
         from .ipp import compute_pk
+        dt = self.config.dt
         new_intercepts = []
         expended_interceptors = set()
         for interceptor in active_interceptors:
             for target in active_targets:
-                dist = interceptor.position.distance_to(target.position)
-                if dist <= self.config.kill_radius:
-                    pk = compute_pk(dist, self.config.lethal_radius)
+                # CPA calculation: find minimum distance during this tick
+                # Relative position and velocity
+                rel_pos = interceptor.position - target.position
+                rel_vel = interceptor.velocity - target.velocity
+                rel_speed_sq = rel_vel.dot(rel_vel)
+
+                if rel_speed_sq > 1e-6:
+                    # Time of closest approach (clamped to [0, dt])
+                    t_cpa = max(0.0, min(dt, -rel_pos.dot(rel_vel) / rel_speed_sq))
+                    # Position at CPA
+                    cpa_pos = rel_pos + rel_vel * t_cpa
+                    cpa_dist = cpa_pos.magnitude()
+                else:
+                    cpa_dist = rel_pos.magnitude()
+
+                if cpa_dist <= self.config.kill_radius:
+                    pk = compute_pk(cpa_dist, self.config.lethal_radius)
                     if _random.random() < pk:
                         new_intercepts.append((interceptor.id, target.id))
                         if self.state.intercepting_id is None:
@@ -1252,10 +1308,14 @@ class SimEngine:
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 12. Check end conditions
+        # 12. Update HUD cache every 25 ticks (~0.5s at 50Hz)
+        if self.state.tick % 25 == 0:
+            self.state.update_hud_cache()
+
+        # 13. Check end conditions
         self._check_end_conditions()
 
-        # 13. Emit state event (include WTA assignments)
+        # 14. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
     async def run(self) -> SimState:
