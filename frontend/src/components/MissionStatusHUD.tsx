@@ -14,6 +14,7 @@ import type {
   ReplayState,
   ImpactPrediction,
 } from '../types';
+import { BatteryStatusPanel } from './BatteryStatusPanel';
 
 interface MissionStatusHUDProps {
   state: SimStateEvent | null;
@@ -194,6 +195,11 @@ export function MissionStatusHUD({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Battery Status */}
+      {state?.batteries && state.batteries.length > 0 && (
+        <BatteryStatusPanel batteries={state.batteries} />
       )}
 
       {/* WTA assignments */}

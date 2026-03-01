@@ -206,6 +206,58 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       accuracyWeight: 0.5,
     },
   },
+  {
+    id: 'battery-defense',
+    name: 'Battery Defense',
+    codename: 'IRON FORTRESS',
+    difficulty: 'HARD',
+    briefing: {
+      situation: 'A salvo of 5 Qassam rockets has been launched from eastern Gaza toward the city of Sderot. Your Iron Dome battery must autonomously detect, evaluate, and engage all threats heading for the defended city.',
+      objective: 'Let the battery BMC autonomously engage all threats predicted to impact the defended area. Conserve ammo by ignoring rockets landing in open fields.',
+      constraints: ['Battery-autonomous engagement', 'IPP-based fire control', '5 rockets inbound', 'Limited magazine depth'],
+      threatPicture: 'Five Qassam-type unguided rockets on ballistic trajectories. Battery must handle detection through engagement autonomously.',
+    },
+    config: {
+      scenario: 'iron_dome_battery',
+      guidance: 'proportional_nav',
+      evasion: 'none',
+      navConstant: 4,
+      numInterceptors: 0,
+      numTargets: 5,
+    },
+    scoring: {
+      parTime: 40,
+      timeBonus: 6,
+      efficiencyWeight: 0.6,
+      accuracyWeight: 0.4,
+    },
+  },
+  {
+    id: 'dual-battery',
+    name: 'Dual Battery',
+    codename: 'TWIN SHIELDS',
+    difficulty: 'EXTREME',
+    briefing: {
+      situation: 'A massive Grad rocket salvo of 8 rockets targets two cities simultaneously. Two Iron Dome batteries must coordinate to defend Ashkelon and Beer Sheva against the incoming barrage.',
+      objective: 'Both batteries must autonomously engage threats targeting their respective defended cities. No rocket must reach a populated area.',
+      constraints: ['Two autonomous batteries', '8 rockets inbound', 'Two defended cities', 'Overlapping sectors'],
+      threatPicture: 'Eight Grad rockets across wide frontage. Split between two population centers. Both batteries must engage simultaneously.',
+    },
+    config: {
+      scenario: 'iron_dome_dual_battery',
+      guidance: 'proportional_nav',
+      evasion: 'none',
+      navConstant: 4,
+      numInterceptors: 0,
+      numTargets: 8,
+    },
+    scoring: {
+      parTime: 50,
+      timeBonus: 4,
+      efficiencyWeight: 0.5,
+      accuracyWeight: 0.5,
+    },
+  },
 ];
 
 export function calculateScore(

@@ -37,6 +37,7 @@ from .assignment import (
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
 from .ipp import ProtectedArea, ImpactPrediction, predict_impact_point, check_threat_to_areas
+from .battery import Battery, BatteryConfig, create_iron_dome_battery
 
 # Optional subsystem imports (features disabled by default)
 try:
@@ -127,6 +128,9 @@ class SimConfig:
     # Protected areas for IPP
     protected_areas: Optional[List['ProtectedArea']] = None
 
+    # Battery system (Phase 5)
+    batteries: Optional[List['BatteryConfig']] = None
+
 
 @dataclass
 class SimState:
@@ -167,6 +171,9 @@ class SimState:
     # Protected areas and impact predictions (Phase 4)
     protected_areas: List['ProtectedArea'] = field(default_factory=list)
     impact_predictions: Dict[str, 'ImpactPrediction'] = field(default_factory=dict)
+
+    # Battery system (Phase 5)
+    batteries: List['Battery'] = field(default_factory=list)
 
     # Legacy property for backward compatibility - single target
     @property
@@ -278,6 +285,10 @@ class SimState:
                 }
                 for tid, pred in self.impact_predictions.items()
             }
+
+        # Include battery states
+        if self.batteries:
+            event["batteries"] = [b.to_state_dict() for b in self.batteries]
 
         return event
 
@@ -399,6 +410,10 @@ class SimEngine:
 
         # Protected areas for IPP (Phase 4)
         self.protected_areas: List[ProtectedArea] = self.config.protected_areas or []
+
+        # Battery system (Phase 5)
+        self.battery_configs: List[BatteryConfig] = self.config.batteries or []
+        self.batteries: List[Battery] = []
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -555,6 +570,14 @@ class SimEngine:
         # Add protected areas to state
         self.state.protected_areas = self.protected_areas
 
+        # Initialize batteries from configs (Phase 5)
+        self.batteries = []
+        for i, bconfig in enumerate(self.battery_configs):
+            battery = Battery(f"BAT_{i+1}", bconfig)
+            self.batteries.append(battery)
+        # Add batteries to state
+        self.state.batteries = self.batteries
+
         self._finalize_scenario_setup(targets, interceptors)
 
     def setup_custom_scenario(
@@ -614,6 +637,14 @@ class SimEngine:
 
         # Add protected areas to state
         self.state.protected_areas = self.protected_areas
+
+        # Initialize batteries from configs (Phase 5)
+        self.batteries = []
+        for i, bconfig in enumerate(self.battery_configs):
+            battery = Battery(f"BAT_{i+1}", bconfig)
+            self.batteries.append(battery)
+        # Add batteries to state
+        self.state.batteries = self.batteries
 
         self._finalize_scenario_setup(targets, interceptors)
 
@@ -706,10 +737,17 @@ class SimEngine:
             l.missiles_remaining > 0 for l in self.state.launchers
         ) if self.state.launchers else False
 
+        # Check if batteries can still launch interceptors
+        batteries_have_missiles = any(
+            b.missiles_remaining > 0 for b in self.batteries
+        ) if self.batteries else False
+
+        can_still_launch = launchers_have_missiles or batteries_have_missiles
+
         # Check if all active interceptors have missed all active targets
         # Only check after initial approach phase (first 2 seconds)
-        # Skip this check if launchers can still spawn more interceptors
-        if self.state.sim_time > 2.0 and active_interceptors and active_targets and not launchers_have_missiles:
+        # Skip this check if launchers/batteries can still spawn more interceptors
+        if self.state.sim_time > 2.0 and active_interceptors and active_targets and not can_still_launch:
             all_missed = True
             for interceptor in active_interceptors:
                 for target in active_targets:
@@ -1000,7 +1038,48 @@ class SimEngine:
                                 self.hmt.propose_action(action)
             # Handle timed out actions if needed
 
-        # 8. LAUNCHERS: Update launch platforms and spawn new interceptors
+        # 8. BATTERIES: Autonomous battery engagement loop
+        if self.batteries:
+            for battery in self.batteries:
+                new_interceptors = battery.update(
+                    targets=active_targets,
+                    sim_time=self.state.sim_time,
+                    existing_interceptors=self.state.interceptors,
+                    impact_predictions=self.state.impact_predictions,
+                )
+                # Add newly launched interceptors to the simulation
+                for interceptor in new_interceptors:
+                    self.state.interceptors.append(interceptor)
+                    # Create evasion state for new interceptor (none needed, but for consistency)
+                    # Create WTA assignment for this battery-launched interceptor
+                    target_id = None
+                    track = battery.tracked_threats.get(None)
+                    # Find which threat this interceptor was assigned to
+                    for tid, trk in battery.tracked_threats.items():
+                        if trk.assigned_interceptor == interceptor.id:
+                            target_id = tid
+                            break
+
+                    if target_id:
+                        new_assignment = Assignment(
+                            interceptor_id=interceptor.id,
+                            target_id=target_id,
+                            cost=0.0,
+                            reason="battery_auto"
+                        )
+                        if self.assignments:
+                            self.assignments.assignments.append(new_assignment)
+                        else:
+                            self.assignments = AssignmentResult(
+                                assignments=[new_assignment],
+                                total_cost=0.0,
+                                algorithm="battery_auto",
+                                unassigned_interceptors=[],
+                                unassigned_targets=[t.id for t in active_targets if t.id != target_id],
+                                timestamp=self.state.sim_time
+                            )
+
+        # 9. LAUNCHERS: Update launch platforms and spawn new interceptors
         if self.state.launchers:
             for launcher in self.state.launchers:
                 new_interceptors = launcher.update(
@@ -1040,7 +1119,7 @@ class SimEngine:
                                 timestamp=self.state.sim_time
                             )
 
-        # 9. PHYSICS: Update all entities (skip intercepted ones)
+        # 10. PHYSICS: Update all entities (skip intercepted ones)
         for target in self.state.targets:
             if target.id in intercepted_target_ids:
                 # Stop intercepted targets
@@ -1054,14 +1133,14 @@ class SimEngine:
                 continue
             interceptor.update(dt)
 
-        # 10. Update sim time
+        # 11. Update sim time
         self.state.sim_time += dt
         self.state.tick += 1
 
-        # 11. Check end conditions
+        # 12. Check end conditions
         self._check_end_conditions()
 
-        # 12. Emit state event (include WTA assignments)
+        # 13. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
     async def run(self) -> SimState:
@@ -1365,6 +1444,140 @@ SCENARIOS = {
                 radius=1500.0,
                 priority=2,
                 population=5000,
+            ),
+        ],
+    },
+    # ─── BATTERY SCENARIOS (Phase 5) ────────────────────────────────
+    "iron_dome_battery": {
+        "description": "Single Iron Dome battery vs 5-rocket salvo — autonomous engagement",
+        "target_start": Vec3(8000, 0, 100),
+        "target_velocity": Vec3(-400, 0, 280),
+        "interceptor_start": Vec3(-500, 500, 50),  # Interceptor start near battery (fallback)
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 5,
+        "num_interceptors": 0,  # No pre-placed interceptors — battery launches them
+        "target_spacing": 2000.0,
+        "threat_type": "qassam",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Sderot",
+                center=Vec3(-2000, 500, 0),
+                radius=2500.0,
+                priority=1,
+                population=30000,
+            ),
+        ],
+        "batteries": [
+            BatteryConfig(
+                position=Vec3(-500, 500, 0),
+                name="Iron Dome Battery Alpha",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                radar_sector=360.0,
+                num_launchers=3,
+                missiles_per_launcher=20,
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Sderot",
+                        center=Vec3(-2000, 500, 0),
+                        radius=2500.0,
+                        priority=1,
+                        population=30000,
+                    ),
+                ],
+            ),
+        ],
+    },
+    "iron_dome_dual_battery": {
+        "description": "Two Iron Dome batteries defending two cities vs 8-rocket salvo",
+        "target_start": Vec3(10000, 0, 100),
+        "target_velocity": Vec3(-380, 30, 300),
+        "interceptor_start": Vec3(-500, 0, 50),
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 8,
+        "num_interceptors": 0,
+        "target_spacing": 1800.0,
+        "threat_type": "grad",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Ashkelon",
+                center=Vec3(-1000, -1000, 0),
+                radius=2500.0,
+                priority=1,
+                population=150000,
+            ),
+            ProtectedArea(
+                id="city_bravo",
+                name="Beer Sheva",
+                center=Vec3(-1000, 4000, 0),
+                radius=3000.0,
+                priority=2,
+                population=210000,
+            ),
+        ],
+        "batteries": [
+            BatteryConfig(
+                position=Vec3(0, -500, 0),
+                name="Battery Alpha",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                radar_sector=360.0,
+                num_launchers=3,
+                missiles_per_launcher=20,
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Ashkelon",
+                        center=Vec3(-1000, -1000, 0),
+                        radius=2500.0,
+                        priority=1,
+                        population=150000,
+                    ),
+                ],
+            ),
+            BatteryConfig(
+                position=Vec3(0, 3500, 0),
+                name="Battery Bravo",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                radar_sector=360.0,
+                num_launchers=3,
+                missiles_per_launcher=20,
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_bravo",
+                        name="Beer Sheva",
+                        center=Vec3(-1000, 4000, 0),
+                        radius=3000.0,
+                        priority=2,
+                        population=210000,
+                    ),
+                ],
             ),
         ],
     },

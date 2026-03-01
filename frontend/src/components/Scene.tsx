@@ -20,7 +20,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Grid, Line, Text, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState, ProtectedArea, ImpactPrediction } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState, ProtectedArea, ImpactPrediction, BatteryState } from '../types';
 import { MissionPlannerContent } from './MissionPlanner';
 import type { PlacementMode, PlannedEntity, PlannedZone } from './MissionPlanner';
 import { CameraController } from './CameraController';
@@ -1190,6 +1190,128 @@ function ImpactPointMarker({ prediction }: { prediction: ImpactPrediction }) {
   );
 }
 
+/**
+ * Battery Platform — 3D visualization for Iron Dome battery
+ * Shows the battery position, radar coverage sector, ammo status, and name.
+ */
+function BatteryPlatform({ battery }: { battery: BatteryState }) {
+  const radarRef = useRef<THREE.Mesh>(null);
+  const position: [number, number, number] = [
+    battery.position.x * SCALE,
+    0.01,
+    -battery.position.y * SCALE,
+  ];
+
+  const statusColor = battery.status === 'operational' ? '#22c55e'
+    : battery.status === 'degraded' ? '#f59e0b'
+    : battery.status === 'winchester' ? '#ef4444'
+    : '#6b7280';
+
+  const ammoFraction = battery.missiles_total > 0
+    ? battery.missiles_remaining / battery.missiles_total
+    : 0;
+
+  // Rotating radar sweep
+  useFrame((state) => {
+    if (radarRef.current) {
+      radarRef.current.rotation.y = state.clock.elapsedTime * 0.5;
+    }
+  });
+
+  const radarRangeScaled = battery.radar_range * SCALE;
+  const sectorAngle = (battery.radar_sector / 360) * Math.PI * 2;
+
+  return (
+    <group position={position}>
+      {/* Battery platform base */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <circleGeometry args={[0.12, 6]} />
+        <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={0.5} />
+      </mesh>
+
+      {/* Battery body — tall box */}
+      <mesh position={[0, 0.04, 0]}>
+        <boxGeometry args={[0.08, 0.08, 0.08]} />
+        <meshStandardMaterial color="#374151" emissive="#1f2937" emissiveIntensity={0.3} />
+      </mesh>
+
+      {/* Radar dome on top */}
+      <mesh position={[0, 0.1, 0]}>
+        <sphereGeometry args={[0.03, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#60a5fa" emissive="#3b82f6" emissiveIntensity={0.6} transparent opacity={0.8} />
+      </mesh>
+
+      {/* Radar coverage sector (rotating sweep) */}
+      <group ref={radarRef} position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh>
+          <ringGeometry args={[0, Math.min(radarRangeScaled, 5), 32, 1, 0, sectorAngle]} />
+          <meshBasicMaterial color="#3b82f6" transparent opacity={0.04} side={THREE.DoubleSide} />
+        </mesh>
+        {/* Radar sweep line */}
+        <mesh>
+          <ringGeometry args={[0, Math.min(radarRangeScaled, 5), 2, 1, 0, 0.03]} />
+          <meshBasicMaterial color="#60a5fa" transparent opacity={0.3} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+
+      {/* Battery name label */}
+      <Text
+        position={[0, 0.2, 0]}
+        fontSize={0.07}
+        color={statusColor}
+        anchorX="center"
+      >
+        {battery.name}
+      </Text>
+
+      {/* Status label */}
+      <Text
+        position={[0, 0.15, 0]}
+        fontSize={0.05}
+        color={statusColor}
+        anchorX="center"
+      >
+        {battery.status.toUpperCase()}
+      </Text>
+
+      {/* Ammo bar background */}
+      <mesh position={[0, 0.12, 0.08]} rotation={[0, 0, 0]}>
+        <planeGeometry args={[0.2, 0.015]} />
+        <meshBasicMaterial color="#1f2937" transparent opacity={0.7} />
+      </mesh>
+      {/* Ammo bar fill */}
+      {ammoFraction > 0 && (
+        <mesh position={[-0.1 * (1 - ammoFraction), 0.12, 0.081]} rotation={[0, 0, 0]}>
+          <planeGeometry args={[0.2 * ammoFraction, 0.012]} />
+          <meshBasicMaterial color={ammoFraction > 0.25 ? '#22c55e' : '#ef4444'} transparent opacity={0.8} />
+        </mesh>
+      )}
+
+      {/* Ammo count */}
+      <Text
+        position={[0.15, 0.12, 0.08]}
+        fontSize={0.04}
+        color="#9ca3af"
+        anchorX="left"
+      >
+        {`${battery.missiles_remaining}/${battery.missiles_total}`}
+      </Text>
+
+      {/* Active engagement indicator */}
+      {battery.active_engagements > 0 && (
+        <Text
+          position={[0, 0.08, 0.08]}
+          fontSize={0.04}
+          color="#f59e0b"
+          anchorX="center"
+        >
+          {`${battery.active_engagements} ACTIVE`}
+        </Text>
+      )}
+    </group>
+  );
+}
+
 interface ExplosionData {
   id: string;
   position: [number, number, number];
@@ -1295,6 +1417,11 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
       {/* Impact Point Markers - Phase 4 IPP */}
       {state?.impact_predictions && Object.values(state.impact_predictions).map((pred) => (
         <ImpactPointMarker key={pred.threat_id} prediction={pred as ImpactPrediction} />
+      ))}
+
+      {/* Battery Platforms - Phase 5 */}
+      {state?.batteries && state.batteries.map((battery) => (
+        <BatteryPlatform key={battery.id} battery={battery} />
       ))}
 
       {/* All Targets */}

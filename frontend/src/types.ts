@@ -33,6 +33,37 @@ export interface ImpactPrediction {
   engage: boolean;
 }
 
+export interface BatteryLauncherState {
+  id: string;
+  missiles_remaining: number;
+  missiles_total: number;
+  ready: boolean;
+}
+
+export interface BatteryState {
+  id: string;
+  name: string;
+  position: Vec3;
+  status: 'operational' | 'degraded' | 'winchester' | 'offline';
+  tier: string;
+  missiles_remaining: number;
+  missiles_total: number;
+  active_engagements: number;
+  max_simultaneous: number;
+  radar_range: number;
+  radar_sector: number;
+  tracked_threats: number;
+  launchers: BatteryLauncherState[];
+  engagement_log: {
+    time: number;
+    type: string;
+    threat_id: string;
+    interceptor_id: string;
+    launcher_id: string;
+    range: number;
+  }[];
+}
+
 export interface EntityState {
   id: string;
   type: 'target' | 'interceptor';
@@ -290,6 +321,8 @@ export interface SimStateEvent {
   // Phase 4: Protected Areas & IPP
   protected_areas?: ProtectedArea[];
   impact_predictions?: Record<string, ImpactPrediction>;
+  // Phase 5: Battery System
+  batteries?: BatteryState[];
 }
 
 // Launcher (Bogey) Types

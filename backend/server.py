@@ -528,12 +528,19 @@ async def start_run(config: RunConfig):
         # Use config value if explicitly set, otherwise use scenario default
         num_targets = config.num_targets if config.num_targets is not None else scenario.get("num_targets", 1)
         target_spacing = scenario.get("target_spacing", 300.0)
-        # Scenario num_interceptors takes precedence (for swarm scenarios)
-        num_interceptors = scenario.get("num_interceptors") or config.num_interceptors
+        # Scenario num_interceptors takes precedence (for swarm/battery scenarios)
+        # Note: use `is not None` check because 0 is a valid value (battery-only scenarios)
+        scenario_num_int = scenario.get("num_interceptors")
+        num_interceptors = scenario_num_int if scenario_num_int is not None else config.num_interceptors
         interceptor_spacing = scenario.get("interceptor_spacing", 100.0)
         protected_areas = scenario.get("protected_areas", None)
         threat_type = scenario.get("threat_type", None)
         interceptor_type = scenario.get("interceptor_type", None)
+        battery_configs = scenario.get("batteries", None)
+
+        # Pass battery configs to engine before setup
+        if battery_configs:
+            current_engine.battery_configs = battery_configs
 
         current_engine.setup_scenario(
             target_start=scenario["target_start"],
