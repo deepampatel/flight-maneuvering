@@ -1,0 +1,20 @@
+{
+  "name": "intercept",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Iron Dome-class multi-layer air defense simulation",
+  "scripts": {
+    "dev": "concurrently -n BE,FE -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && python server.py",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "docker": "docker compose up --build",
+    "docker:detach": "docker compose up --build -d",
+    "setup": "cd frontend && npm install",
+    "typecheck": "cd frontend && npx tsc --noEmit",
+    "lint": "cd frontend && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

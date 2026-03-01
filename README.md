@@ -1,20 +1,50 @@
-# Intercept
+# INTERCEPT
 
-**Learning missile guidance by building it from scratch.**
+**Iron Dome-class multi-layer air defense simulation.**
 
-A real-time simulation for understanding how missiles actually find their targets — from basic pursuit to proportional navigation to AI-guided intercepts.
+Real-time 3D visualization of missile guidance, interception physics, and tactical C2 — from proportional navigation to swarm coordination to human-machine teaming.
 
 ![Intercept Simulation](docs/screenshot.png)
 
+**React** + **Three.js** | **Python** + **FastAPI** | **WebSocket @ 50Hz** | **Docker**
+
 ---
 
-## Why This Exists
+## Quick Start
 
-I wanted to understand missile guidance beyond textbook equations. How does proportional navigation *actually* work? Why do missiles miss maneuvering targets? What makes sensor fusion hard?
+### One-command dev (recommended)
 
-So I built a sandbox to find out.
+```bash
+git clone https://github.com/yourusername/intercept.git
+cd intercept
+npm install          # installs concurrently
+npm run setup        # installs frontend deps
+npm run dev          # starts backend + frontend
+```
 
-What started as "implement PN and see if it works" turned into a full tactical simulation with multi-target engagement, swarm coordination, human-machine teaming, and ML-based threat assessment. Each feature exists because I hit a question I couldn't answer without building it.
+Open **http://localhost:5173**. Select a scenario. Click **LAUNCH**.
+
+### Docker (single port)
+
+```bash
+docker compose up --build
+```
+
+Open **http://localhost:8000**. Everything served from one container.
+
+### Manual (two terminals)
+
+```bash
+# Terminal 1: Backend
+cd backend
+uv sync  # or: pip install -e .
+python server.py
+
+# Terminal 2: Frontend
+cd frontend
+npm install
+npm run dev
+```
 
 ---
 
@@ -32,191 +62,126 @@ What started as "implement PN and see if it works" turned into a full tactical s
 - Enable random jinking and see intercept rates collapse
 - Find the edges of the engagement envelope
 
-**Build intuition for hard problems**
-- Why does WTA assignment matter with 4 targets and 3 interceptors?
-- When does sensor fusion actually help vs. add latency?
-- How much autonomy should a human operator delegate?
+**Analyze statistically**
+- Monte Carlo batch runs (100+ iterations) for Pk estimation
+- Engagement envelope heatmaps across range and bearing
+- Record and replay any engagement
 
 ---
 
-## The Stack
-
-```
-Frontend: React + Three.js (3D visualization)
-Backend:  Python + FastAPI (simulation engine)
-Comms:    WebSocket @ 50Hz (real-time state)
-```
-
-Everything runs locally. No cloud dependencies.
-
----
-
-## Quick Start
-
-```bash
-# Terminal 1: Backend
-cd backend
-uv sync  # or: pip install -e .
-python server.py
-
-# Terminal 2: Frontend
-cd frontend
-npm install
-npm run dev
-```
-
-Open http://localhost:5173. Select a scenario. Click LAUNCH. Watch.
-
----
-
-## What's Implemented
-
-### Core Simulation
-- 3D kinematics with configurable timestep (default 50Hz)
-- Entity model: position, velocity, acceleration, physical properties
-- Semi-implicit Euler integration
-- Intercept detection with configurable kill radius
-
-### Guidance Laws
-- **Pure Pursuit** — point at target (baseline, not great)
-- **Proportional Navigation** — the industry standard
-- **Augmented PN** — handles maneuvering targets
-- **ML Policy** — ONNX neural network inference
-
-### Target Behavior
-- Constant velocity (for testing)
-- Constant-G turns
-- Weave/S-turns
-- Barrel roll (3D evasion)
-- Random jinking
-
-### Sensors & Tracking
-- Detection probability curves (range, aspect)
-- Measurement noise (range, angle)
-- 6-state Kalman filter per track
-- Multi-sensor fusion
-- Track quality scoring
-
-### Multi-Target
-- 1-20+ simultaneous targets
-- Weapon-Target Assignment: Greedy, Threat-Priority, Hungarian
-- Per-target threat scoring
-- Real-time reassignment
-
-### Launch Platforms
-- Autonomous missile launchers ("bogeys")
-- Detection range, magazine capacity
-- Auto-launch with lead prediction
-- Command center alerts (FOX THREE, WINCHESTER, etc.)
-
-### Environment
-- Wind fields with gusts
-- Altitude-dependent air density
-- Aerodynamic drag
-- Terrain masking (LOS blocking)
-
-### Swarm Coordination
-- Formations: V, echelon, wedge, line abreast, trail, diamond
-- Reynolds flocking behaviors
-- Leader following
-- Collision avoidance
-
-### Human-Machine Teaming
-- Authority levels: Full Auto → Human-in-Loop → Manual
-- Action proposal/approval workflow
-- Workload and trust metrics
-- Configurable timeouts
-
-### Analysis Tools
-- Monte Carlo batch runs (100+ iterations)
-- Parameter sweeps
-- Engagement envelope mapping
-- Recording & replay
-
----
-
-## Project Structure
+## Architecture
 
 ```
 intercept/
 ├── backend/
 │   ├── sim/
-│   │   ├── engine.py        # Main simulation loop
-│   │   ├── guidance.py      # PN, APN, pursuit, ML
-│   │   ├── evasion.py       # Target maneuvers
-│   │   ├── sensor.py        # Detection + Kalman
-│   │   ├── fusion.py        # Multi-sensor fusion
-│   │   ├── assignment.py    # WTA algorithms
-│   │   ├── threat.py        # Threat scoring
-│   │   ├── launcher.py      # Launch platforms
-│   │   ├── swarm.py         # Formation control
-│   │   ├── terrain.py       # LOS masking
-│   │   ├── hmt.py           # Human-machine teaming
-│   │   ├── environment.py   # Wind, drag
-│   │   ├── monte_carlo.py   # Batch analysis
-│   │   └── ml/              # ONNX inference
-│   └── server.py            # FastAPI + WebSocket
+│   │   ├── engine.py          # Core tick loop (50Hz)
+│   │   ├── guidance.py        # PN, APN, pursuit, ML
+│   │   ├── evasion.py         # Target maneuvers
+│   │   ├── sensor.py          # Detection + Kalman filter
+│   │   ├── fusion.py          # Multi-sensor fusion
+│   │   ├── assignment.py      # WTA: Greedy, Hungarian, Threat-Priority
+│   │   ├── threat.py          # Threat scoring (0-100)
+│   │   ├── launcher.py        # Autonomous launch platforms
+│   │   ├── swarm.py           # Formation control + Reynolds flocking
+│   │   ├── hmt.py             # Human-machine teaming
+│   │   ├── environment.py     # Wind, drag, terrain
+│   │   ├── monte_carlo.py     # Statistical analysis
+│   │   └── ml/                # ONNX neural network inference
+│   └── server.py              # FastAPI + WebSocket + static serving
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── Scene.tsx    # Three.js 3D view
-│       │   └── ...
+│       │   ├── Scene.tsx             # Three.js 3D visualization
+│       │   ├── MissionToolbar.tsx    # Scenario + guidance controls
+│       │   ├── MissionStatusHUD.tsx  # Real-time mission panels
+│       │   ├── AdvancedPanel.tsx     # Tabbed analysis sidebar
+│       │   ├── SplashScreen.tsx      # Cinematic loading screen
+│       │   ├── WelcomeModal.tsx      # First-visit onboarding
+│       │   └── panels/              # Analysis, Recordings, ML, etc.
 │       └── hooks/
-│           └── useSimulation.ts
-└── README.md
+│           ├── useSimulation.ts      # WebSocket + REST integration
+│           └── useKeyboardShortcuts.ts
+├── docker-compose.yml
+├── Dockerfile
+└── package.json                      # Unified dev commands
 ```
 
 ---
 
-## Key Concepts I Learned
+## Simulation Systems
+
+| System | Description |
+|--------|-------------|
+| **Guidance** | Pure Pursuit, Proportional Nav, Augmented PN, ML Policy |
+| **Evasion** | Constant-G, weave, barrel roll, random jink |
+| **Sensors** | Range/angle noise, detection probability, 6-state Kalman |
+| **Multi-Target** | Hungarian, Greedy, Threat-Priority WTA |
+| **Launch Platforms** | Autonomous detection + lead prediction + magazine |
+| **Environment** | Wind fields, gusts, altitude-dependent drag |
+| **Swarm** | V, echelon, wedge, line abreast, diamond formations |
+| **HMT** | Full Auto / Human-on-Loop / Human-in-Loop / Manual |
+| **Analysis** | Monte Carlo (100+ runs), engagement envelope, record/replay |
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Space` | Launch / Stop simulation |
+| `Esc` | Abort simulation |
+| `R` | Toggle recording |
+| `1-4` | Camera modes (Free / Chase / Tactical / Cinematic) |
+| `A` | Toggle advanced panel |
+| `?` | Show shortcuts |
+
+---
+
+## NPM Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start backend + frontend concurrently |
+| `npm run build` | Production build (frontend) |
+| `npm run docker` | Docker compose up |
+| `npm run typecheck` | TypeScript type check |
+| `npm run lint` | ESLint |
+
+---
+
+## Tech Stack
+
+- **Frontend**: React 19, TypeScript, Three.js / React Three Fiber, Vite
+- **Backend**: Python 3.11+, FastAPI, NumPy, SciPy
+- **Infrastructure**: Docker, WebSocket (real-time 50Hz state streaming)
+- **Optional**: ONNX Runtime (ML inference)
+
+---
+
+## Key Concepts
 
 ### Proportional Navigation
 The core insight: if the line-of-sight angle to a target isn't changing, you're on a collision course. PN commands acceleration proportional to how fast that angle *is* changing, driving it to zero.
 
 ```
-a = N × Vc × LOS_rate
+a = N x Vc x LOS_rate
 ```
 
-N is the navigation constant (typically 3-5). Higher = more aggressive maneuvering. Too high = oscillation. Too low = can't catch maneuvering targets.
-
-### Why Sensors Make Everything Hard
-Perfect state knowledge is easy. Add 50m range noise and 1° angle noise and suddenly your guidance law is chasing ghosts. The Kalman filter helps, but introduces lag. Sensor fusion helps more, but now you're correlating tracks across platforms. Every layer adds complexity.
+N is the navigation constant (typically 3-5). Higher = more aggressive. Too high = oscillation.
 
 ### The Assignment Problem
-With 1 interceptor and 1 target, guidance is the whole problem. With 4 interceptors and 6 targets, *who shoots what* matters as much as *how*. Hungarian algorithm gives optimal assignment but assumes you know costs. Greedy is fast but suboptimal. Threat-priority makes sense tactically but ignores geometry.
+With 1 interceptor and 1 target, guidance is the whole problem. With 4 interceptors and 6 targets, *who shoots what* matters as much as *how*. Hungarian algorithm gives optimal assignment but assumes you know costs.
 
 ### Human-Machine Teaming
-Full autonomy is easy to implement. Full manual is easy to implement. The middle — "human on the loop" where the AI acts but the human can override — requires carefully designed interaction patterns, trust calibration, and workload management. This is where real systems struggle.
-
----
-
-## What's Next
-
-Things I want to understand better:
-
-- **Electronic warfare** — jamming, ECCM, how degraded sensors affect everything
-- **Fuel constraints** — when range matters, optimal intercept changes
-- **Multi-domain** — surface-to-air, naval integration
-- **Distributed autonomy** — when platforms can't communicate continuously
-
----
-
-## Running Tests
-
-```bash
-cd backend
-python -c "from sim.engine import SimEngine; print('Engine OK')"
-python -c "from sim.guidance import proportional_navigation; print('Guidance OK')"
-```
+Full autonomy is easy. Full manual is easy. The middle ground — AI acts, human overrides — requires trust calibration, workload management, and carefully designed interaction patterns.
 
 ---
 
 ## References
 
-What I learned from:
-
-- Zarchan, *Tactical and Strategic Missile Guidance* — the bible
-- Siouris, *Missile Guidance and Control Systems* — good on Kalman
+- Zarchan, *Tactical and Strategic Missile Guidance*
+- Siouris, *Missile Guidance and Control Systems*
 - Various AIAA papers on cooperative engagement
 
 ---
@@ -224,9 +189,3 @@ What I learned from:
 ## License
 
 MIT. Use it, learn from it, build on it.
-
----
-
-<p align="center">
-  <em>Built to learn. Kept building because the questions kept getting better.</em>
-</p>
