@@ -21,6 +21,7 @@ import { CameraModeSelector } from './components/CameraController';
 import type { CameraMode } from './components/CameraController';
 import { ReplayTheater } from './components/ReplayTheater';
 import { ScenarioBriefing, ScenarioDebrief } from './components/ScenarioBriefing';
+import { SplashScreen } from './components/SplashScreen';
 import { NARRATIVE_SCENARIOS, calculateScore } from './data/scenarios';
 import type { NarrativeScenario } from './data/scenarios';
 import { useAudio } from './hooks/useAudio';
@@ -110,6 +111,9 @@ function App() {
   const [scenarioResult, setScenarioResult] = useState<ReturnType<typeof calculateScore> | null>(null);
   const [scenarioSimTime, setScenarioSimTime] = useState(0);
   const [scenarioMissDistance, setScenarioMissDistance] = useState(0);
+
+  // Splash screen state
+  const [showSplash, setShowSplash] = useState(true);
 
   // Replay theater state
   const [replaySpeed, setReplaySpeed] = useState(1);
@@ -307,9 +311,19 @@ function App() {
         />
       )}
 
+      {showSplash && (
+        <SplashScreen
+          connected={connected}
+          onComplete={() => setShowSplash(false)}
+        />
+      )}
+
       <header className="app-header">
         <div className="header-left">
-          <h1>Intercept</h1>
+          <div className="header-brand">
+            <h1>Intercept</h1>
+            <span className="header-subtitle">AIR DEFENSE COMMAND</span>
+          </div>
           <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
             <span className="status-dot" />
             {connected ? 'ONLINE' : 'OFFLINE'}

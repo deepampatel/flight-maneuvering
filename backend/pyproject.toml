@@ -1,7 +1,7 @@
 [project]
-name = "air-dominance"
-version = "0.1.0"
-description = "Air intercept simulation sandbox"
+name = "intercept-sim"
+version = "2.0.0"
+description = "Iron Dome-class multi-layer air defense simulation"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.109.0",
