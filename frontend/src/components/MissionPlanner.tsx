@@ -64,7 +64,7 @@ interface MissionPlannerProps {
 // Color palettes
 const INTERCEPTOR_COLORS = ['#3b82f6', '#22c55e', '#06b6d4', '#a855f7', '#f97316'];
 const TARGET_COLORS = ['#ef4444', '#f97316', '#dc2626', '#ea580c'];
-const LAUNCHER_COLORS = ['#fbbf24', '#f59e0b', '#d97706', '#b45309'];  // Amber/orange for launchers
+const LAUNCHER_COLORS = ['#eab308', '#f59e0b', '#d97706', '#b45309'];  // Amber/orange for launchers
 const ZONE_COLORS = ['#00ff00', '#00ffff', '#ff00ff', '#ffff00'];
 
 // Grid settings
@@ -1402,7 +1402,7 @@ export function MissionPlannerContent({
           color={
             mode === 'interceptor' ? '#3b82f6' :
             mode === 'target' ? '#ef4444' :
-            mode === 'launcher' ? '#fbbf24' :
+            mode === 'launcher' ? '#eab308' :
             '#00ff00'
           }
           anchorX="center"

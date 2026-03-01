@@ -310,7 +310,7 @@ export function MissionStatusHUD({
             {state.tewa.fallback_count > 0 && (
               <div className="hud-row">
                 <span className="hud-label">FLBK</span>
-                <span className="hud-value" style={{ color: '#fbbf24' }}>
+                <span className="hud-value" style={{ color: '#eab308' }}>
                   {state.tewa.fallback_count}
                 </span>
               </div>
@@ -318,7 +318,7 @@ export function MissionStatusHUD({
             {Object.entries(state.tewa.tier_status).map(([tier, status]) => {
               if (status.batteries === 0) return null;
               const tierLabel = tier === 'iron_dome' ? 'ID' : tier === 'davids_sling' ? 'DS' : 'AR';
-              const tierColor = tier === 'iron_dome' ? '#60a5fa' : tier === 'davids_sling' ? '#22d3ee' : '#a855f7';
+              const tierColor = tier === 'iron_dome' ? '#3b82f6' : tier === 'davids_sling' ? '#06b6d4' : '#8b5cf6';
               return (
                 <div key={tier} className="hud-row">
                   <span className="hud-label" style={{ color: tierColor }}>{tierLabel}</span>

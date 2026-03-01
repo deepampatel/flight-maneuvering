@@ -30,7 +30,7 @@ const generateEventId = () => `evt_${Date.now()}_${++eventCounter}`;
 
 // Event display configuration
 const EVENT_CONFIG: Record<LaunchEventType, { icon: string; color: string; duration: number }> = {
-  target_detected: { icon: '📡', color: '#fbbf24', duration: 4000 },
+  target_detected: { icon: '📡', color: '#eab308', duration: 4000 },
   missile_launched: { icon: '🚀', color: '#ef4444', duration: 5000 },
   magazine_depleted: { icon: '⚠️', color: '#f97316', duration: 6000 },
   intercept_success: { icon: '💥', color: '#22c55e', duration: 6000 },

@@ -113,11 +113,11 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
     position: 'relative',
     width: '100%',
     height: 30,
-    background: 'linear-gradient(to bottom, #0d1117 0%, #161b22 100%)',
-    borderTop: '1px solid #1a2a1a',
-    fontFamily: "'Courier New', monospace",
+    background: '#18181b',
+    borderTop: '1px solid rgba(63, 63, 70, 0.5)',
+    fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: 9,
-    color: '#556655',
+    color: '#71717a',
     userSelect: 'none',
     overflow: 'hidden',
   };
@@ -127,8 +127,8 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
     top: 12,
     left: 40,
     right: 40,
-    height: 4,
-    background: '#1a2a1a',
+    height: 3,
+    background: '#27272a',
     borderRadius: 2,
   };
 
@@ -138,7 +138,7 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
     left: 0,
     width: `${progress * 100}%`,
     height: '100%',
-    background: 'linear-gradient(to right, #1a3a1a, #2a5a2a)',
+    background: 'linear-gradient(to right, #1e3a5f, #3b82f6)',
     borderRadius: 2,
     transition: 'width 0.1s linear',
   };
@@ -172,7 +172,7 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
               borderLeft: '4px solid transparent',
               borderRight: '4px solid transparent',
               borderBottom: `7px solid ${marker.color}`,
-              filter: `drop-shadow(0 0 2px ${marker.color})`,
+              opacity: 0.9,
             }}
           />
         </div>
@@ -188,7 +188,7 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
               height: 6,
               borderRadius: '50%',
               background: marker.color,
-              boxShadow: `0 0 3px ${marker.color}`,
+              opacity: 0.9,
               marginTop: 3,
             }}
           />
@@ -225,7 +225,7 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
               bottom: 1,
               left: `calc(${TRACK_LEFT}px + (100% - ${TRACK_LEFT + TRACK_RIGHT}px) * ${frac})`,
               transform: 'translateX(-50%)',
-              color: '#556655',
+              color: '#71717a',
               fontSize: 8,
               letterSpacing: 0.5,
             }}
@@ -248,8 +248,8 @@ export function EngagementTimeline({ state, maxTime = 60 }: EngagementTimelinePr
           left: `calc(${TRACK_LEFT}px + (100% - ${TRACK_LEFT + TRACK_RIGHT}px) * ${progress})`,
           height: 22,
           width: 1,
-          background: '#ffffff',
-          boxShadow: '0 0 4px rgba(255,255,255,0.6)',
+          background: '#fafafa',
+          opacity: 0.8,
           zIndex: 10,
           transition: 'left 0.1s linear',
           transform: 'translateX(-0.5px)',

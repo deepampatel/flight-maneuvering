@@ -52,8 +52,8 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
         name: 'ARROW',
         tier: 'arrow',
         rangeLabel: '100-2400km',
-        color: '#a855f7',
-        glowColor: 'rgba(168, 85, 247, 0.3)',
+        color: '#8b5cf6',
+        glowColor: 'rgba(139, 92, 246, 0.3)',
         batteries: tierMap.arrow,
         totalAmmo: tierMap.arrow.reduce((s, b) => s + b.missiles_remaining, 0),
         maxAmmo: tierMap.arrow.reduce((s, b) => s + b.missiles_total, 0),
@@ -63,8 +63,8 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
         name: "DAVID'S SLING",
         tier: 'davids_sling',
         rangeLabel: '40-300km',
-        color: '#22d3ee',
-        glowColor: 'rgba(34, 211, 238, 0.3)',
+        color: '#06b6d4',
+        glowColor: 'rgba(6, 182, 212, 0.3)',
         batteries: tierMap.davids_sling,
         totalAmmo: tierMap.davids_sling.reduce((s, b) => s + b.missiles_remaining, 0),
         maxAmmo: tierMap.davids_sling.reduce((s, b) => s + b.missiles_total, 0),
@@ -74,8 +74,8 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
         name: 'IRON DOME',
         tier: 'iron_dome',
         rangeLabel: '4-70km',
-        color: '#60a5fa',
-        glowColor: 'rgba(96, 165, 250, 0.3)',
+        color: '#3b82f6',
+        glowColor: 'rgba(59, 130, 246, 0.3)',
         batteries: tierMap.iron_dome,
         totalAmmo: tierMap.iron_dome.reduce((s, b) => s + b.missiles_remaining, 0),
         maxAmmo: tierMap.iron_dome.reduce((s, b) => s + b.missiles_total, 0),
@@ -96,20 +96,20 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
     width: WIDTH,
     zIndex: 100,
     pointerEvents: 'none',
-    fontFamily: "'Courier New', monospace",
+    fontFamily: "'Inter', system-ui, sans-serif",
   };
 
   const panelStyle: CSSProperties = {
-    background: 'rgba(5, 10, 20, 0.9)',
-    border: '1px solid #1a2a3a',
-    borderRadius: 2,
+    background: 'rgba(24, 24, 27, 0.85)',
+    border: '1px solid rgba(63, 63, 70, 0.5)',
+    borderRadius: 6,
     padding: '6px 8px',
   };
 
   const titleStyle: CSSProperties = {
     fontSize: 9,
-    color: '#8899aa',
-    letterSpacing: 1.5,
+    color: '#a1a1aa',
+    letterSpacing: 1,
     marginBottom: 6,
     textAlign: 'center',
   };
@@ -159,7 +159,7 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
                   textAnchor="middle"
                   fill={hasBatteries ? tier.color : '#555'}
                   fontSize={7}
-                  fontFamily="'Courier New', monospace"
+                  fontFamily="'Inter', system-ui, sans-serif"
                   opacity={hasBatteries ? 1 : 0.5}
                 >
                   {tier.name}
@@ -169,14 +169,14 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
           })}
 
           {/* Center point (defended area) */}
-          <circle cx={(WIDTH - 16) / 2} cy={HEIGHT - 35} r={3} fill="#4ade80" opacity={0.8} />
+          <circle cx={(WIDTH - 16) / 2} cy={HEIGHT - 35} r={3} fill="#22c55e" opacity={0.8} />
           <text
             x={(WIDTH - 16) / 2}
             y={HEIGHT - 25}
             textAnchor="middle"
-            fill="#4ade80"
+            fill="#22c55e"
             fontSize={6}
-            fontFamily="'Courier New', monospace"
+            fontFamily="'Inter', system-ui, sans-serif"
           >
             DEFENDED
           </text>
@@ -200,14 +200,14 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
             height: 6,
             borderRadius: '50%',
             background: tier.color,
-            boxShadow: `0 0 4px ${tier.glowColor}`,
+            opacity: 0.9,
             flexShrink: 0,
           };
 
           const ammoBarBg: CSSProperties = {
             flex: 1,
             height: 4,
-            background: '#1a1a2a',
+            background: '#27272a',
             borderRadius: 2,
             overflow: 'hidden',
           };
@@ -229,7 +229,7 @@ export function LayerDiagram({ state }: LayerDiagramProps) {
               <div style={ammoBarBg}>
                 <div style={ammoBarFill} />
               </div>
-              <span style={{ color: '#8899aa', width: 28, textAlign: 'right', flexShrink: 0 }}>
+              <span style={{ color: '#a1a1aa', width: 28, textAlign: 'right', flexShrink: 0 }}>
                 {tier.totalAmmo}
               </span>
               {tier.activeEngagements > 0 && (

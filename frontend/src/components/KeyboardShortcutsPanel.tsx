@@ -1,7 +1,7 @@
 /**
  * KeyboardShortcutsPanel — Floating overlay listing all shortcuts
  *
- * Toggle with `?` key. Military-styled with border and scan-line.
+ * Toggle with `?` key.
  */
 
 import type { ShortcutDef } from '../hooks/useKeyboardShortcuts';

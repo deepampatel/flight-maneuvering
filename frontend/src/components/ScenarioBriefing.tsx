@@ -1,8 +1,7 @@
 /**
- * ScenarioBriefing - Full-screen mission briefing modal
+ * ScenarioBriefing - Full-screen scenario briefing modal
  *
- * Military C2 aesthetic with typewriter text animation,
- * threat diagram, and classification header.
+ * Clean briefing layout with scenario sections.
  */
 
 import type { NarrativeScenario } from '../data/scenarios';
@@ -26,11 +25,6 @@ export function ScenarioBriefing({ scenario, onCommence, onBack }: ScenarioBrief
   return (
     <div className="briefing-overlay">
       <div className="briefing-modal">
-        {/* Classification header */}
-        <div className="briefing-classification">
-          TOP SECRET // NOFORN // MISSION BRIEFING
-        </div>
-
         {/* Mission header */}
         <div className="briefing-header">
           <div className="briefing-codename">{scenario.codename}</div>
@@ -43,7 +37,7 @@ export function ScenarioBriefing({ scenario, onCommence, onBack }: ScenarioBrief
         {/* Situation */}
         <div className="briefing-section">
           <div className="briefing-section-label">SITUATION</div>
-          <p className="briefing-text typewriter">{scenario.briefing.situation}</p>
+          <p className="briefing-text">{scenario.briefing.situation}</p>
         </div>
 
         {/* Objective */}
@@ -78,14 +72,10 @@ export function ScenarioBriefing({ scenario, onCommence, onBack }: ScenarioBrief
 
         {/* Actions */}
         <div className="briefing-actions">
-          <button className="briefing-btn-back" onClick={onBack}>ABORT</button>
-          <button className="briefing-btn-commence" onClick={onCommence}>COMMENCE</button>
+          <button className="briefing-btn-back" onClick={onBack}>Back</button>
+          <button className="briefing-btn-commence" onClick={onCommence}>Start</button>
         </div>
 
-        {/* Classification footer */}
-        <div className="briefing-classification">
-          TOP SECRET // NOFORN
-        </div>
       </div>
     </div>
   );
@@ -123,10 +113,6 @@ export function ScenarioDebrief({ scenario, result, simTime, missDistance, onRep
   return (
     <div className="briefing-overlay">
       <div className="briefing-modal debrief-modal">
-        <div className="briefing-classification">
-          ENGAGEMENT REPORT // {scenario.codename}
-        </div>
-
         {/* Grade */}
         <div className="debrief-grade" style={{ color: gradeColor, textShadow: `0 0 30px ${gradeColor}` }}>
           {result.grade}
@@ -172,9 +158,9 @@ export function ScenarioDebrief({ scenario, result, simTime, missDistance, onRep
         </div>
 
         <div className="briefing-actions">
-          <button className="briefing-btn-back" onClick={onBack}>MENU</button>
-          <button className="briefing-btn-back" onClick={onReplay}>REPLAY</button>
-          <button className="briefing-btn-commence" onClick={onNext}>NEXT MISSION</button>
+          <button className="briefing-btn-back" onClick={onBack}>Menu</button>
+          <button className="briefing-btn-back" onClick={onReplay}>Replay</button>
+          <button className="briefing-btn-commence" onClick={onNext}>Next</button>
         </div>
       </div>
     </div>

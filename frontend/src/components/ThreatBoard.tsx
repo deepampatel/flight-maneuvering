@@ -2,8 +2,7 @@
  * ThreatBoard - Air Defense Threat Tracking Table
  *
  * Displays a compact data table of all tracked threats with engagement
- * decisions, status, and summary counts. Military C2 aesthetic with
- * monospace readouts and color-coded threat states.
+ * decisions, status, and summary counts.
  */
 
 import { useMemo } from 'react';
@@ -163,36 +162,34 @@ export function ThreatBoard({ state }: ThreatBoardProps) {
   );
 }
 
-/* ---------- Inline styles (matches C2 design system tokens) ---------- */
+/* ---------- Inline styles ---------- */
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    fontFamily: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
+    fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: '0.7rem',
-    letterSpacing: '0.05em',
-    color: '#e2e8f0',
-    background: 'rgba(13, 17, 28, 0.95)',
-    border: '1px solid #1e293b',
-    borderRadius: 2,
+    letterSpacing: '0.01em',
+    color: '#fafafa',
+    background: 'rgba(24, 24, 27, 0.85)',
+    border: '1px solid rgba(63, 63, 70, 0.5)',
+    borderRadius: 6,
   },
   header: {
     padding: '0.35rem 0.6rem',
     fontSize: '0.65rem',
-    fontWeight: 700,
-    letterSpacing: '0.12em',
-    color: '#fbbf24',
-    borderBottom: '1px solid #1e293b',
-    background: 'rgba(251, 191, 36, 0.06)',
+    fontWeight: 600,
+    letterSpacing: '0.06em',
+    color: '#a1a1aa',
+    borderBottom: '1px solid rgba(63, 63, 70, 0.5)',
     textAlign: 'center' as const,
   },
   noData: {
     padding: '1.5rem',
     textAlign: 'center' as const,
-    color: '#475569',
+    color: '#71717a',
     fontSize: '0.65rem',
-    letterSpacing: '0.1em',
   },
   tableWrapper: {
     overflowX: 'auto' as const,
@@ -209,8 +206,8 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'left' as const,
     fontWeight: 600,
     fontSize: '0.6rem',
-    color: '#64748b',
-    borderBottom: '1px solid #2a3548',
+    color: '#71717a',
+    borderBottom: '1px solid rgba(63, 63, 70, 0.5)',
     whiteSpace: 'nowrap' as const,
     userSelect: 'none' as const,
   },
@@ -219,21 +216,21 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'right' as const,
     fontWeight: 600,
     fontSize: '0.6rem',
-    color: '#64748b',
-    borderBottom: '1px solid #2a3548',
+    color: '#71717a',
+    borderBottom: '1px solid rgba(63, 63, 70, 0.5)',
     whiteSpace: 'nowrap' as const,
     userSelect: 'none' as const,
   },
   row: {
-    borderBottom: '1px solid rgba(30, 41, 59, 0.5)',
+    borderBottom: '1px solid rgba(63, 63, 70, 0.3)',
     transition: 'background 0.15s ease',
   },
   rowEngage: {
     background: 'rgba(239, 68, 68, 0.08)',
   },
   rowDecoy: {
-    borderLeft: '2px dotted #64748b',
-    borderRight: '2px dotted #64748b',
+    borderLeft: '2px dotted #71717a',
+    borderRight: '2px dotted #71717a',
   },
   td: {
     padding: '0.25rem 0.5rem',
@@ -248,16 +245,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontVariantNumeric: 'tabular-nums',
   },
   idCell: {
-    color: '#60a5fa',
+    color: '#3b82f6',
     fontWeight: 600,
   },
   typeCell: {
-    color: '#94a3b8',
+    color: '#a1a1aa',
   },
   emptyRow: {
     padding: '1rem',
     textAlign: 'center' as const,
-    color: '#475569',
+    color: '#71717a',
     fontStyle: 'italic' as const,
   },
   summary: {
@@ -268,22 +265,22 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0.35rem 0.6rem',
     fontSize: '0.6rem',
     fontWeight: 600,
-    letterSpacing: '0.08em',
-    color: '#64748b',
-    borderTop: '1px solid #1e293b',
-    background: 'rgba(0, 0, 0, 0.2)',
+    letterSpacing: '0.02em',
+    color: '#71717a',
+    borderTop: '1px solid rgba(63, 63, 70, 0.5)',
+    background: 'rgba(0, 0, 0, 0.15)',
   },
   summaryDivider: {
-    color: '#2a3548',
+    color: 'rgba(63, 63, 70, 0.5)',
   },
   summaryValue: {
-    color: '#e2e8f0',
+    color: '#fafafa',
   },
   summaryValueRed: {
     color: '#ef4444',
   },
   summaryValueGreen: {
-    color: '#4ade80',
+    color: '#22c55e',
   },
 };
 
@@ -293,21 +290,21 @@ const ippStyles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   TRACK: {
-    color: '#fbbf24',
+    color: '#eab308',
     fontWeight: 600,
   },
   IGNORE: {
-    color: '#64748b',
+    color: '#71717a',
     fontWeight: 400,
   },
   '---': {
-    color: '#475569',
+    color: '#52525b',
   },
 };
 
 const statusStyles: Record<string, React.CSSProperties> = {
   ACTIVE: {
-    color: '#4ade80',
+    color: '#22c55e',
     fontWeight: 600,
   },
   INTERCEPTED: {
@@ -316,7 +313,7 @@ const statusStyles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
   },
   IMPACT: {
-    color: '#f59e0b',
+    color: '#eab308',
     fontWeight: 700,
   },
 };
