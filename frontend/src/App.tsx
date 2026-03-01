@@ -24,6 +24,8 @@ import { ScenarioBriefing, ScenarioDebrief } from './components/ScenarioBriefing
 import { SplashScreen } from './components/SplashScreen';
 import { WelcomeModal } from './components/WelcomeModal';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
+import { RadarSweep } from './components/RadarSweep';
+import { EngagementTimeline } from './components/EngagementTimeline';
 import { NARRATIVE_SCENARIOS, calculateScore } from './data/scenarios';
 import type { NarrativeScenario } from './data/scenarios';
 import { useAudio } from './hooks/useAudio';
@@ -494,6 +496,9 @@ function App() {
             interceptGeometry={firstGeometry}
           />
 
+          {/* Radar PPI overlay — top-left picture-in-picture */}
+          {isRunning && <RadarSweep state={state} />}
+
           {/* Camera mode selector */}
           {!isReplayActive && (
             <CameraModeSelector
@@ -521,6 +526,9 @@ function App() {
           />
         )}
       </main>
+
+      {/* Engagement Timeline — bottom strip */}
+      {isRunning && <EngagementTimeline state={state} />}
 
       {/* Mission Planner Sidebar - shown when not running and not in replay */}
       {!isRunning && !isReplayActive && (

@@ -1378,9 +1378,9 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
   return (
     <>
       {/* Lighting */}
-      <ambientLight intensity={0.4} />
-      <directionalLight position={[10, 10, 5]} intensity={1} />
-      <directionalLight position={[-10, -10, -5]} intensity={0.3} />
+      <ambientLight intensity={0.15} />
+      <directionalLight position={[10, 10, 5]} intensity={0.3} color="#4466aa" />
+      <directionalLight position={[-10, -10, -5]} intensity={0.15} />
 
       {/* Camera controller - supports multiple view modes */}
       <CameraController
@@ -1544,15 +1544,32 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
 
       {/* Explosions on intercept */}
       {explosions && explosions.map(exp => (
-        <Explosion
-          key={exp.id}
-          position={exp.position}
-          onComplete={() => onExplosionComplete?.(exp.id)}
-        />
+        <group key={exp.id}>
+          <Explosion
+            position={exp.position}
+            onComplete={() => onExplosionComplete?.(exp.id)}
+          />
+          {/* Bright flash point light for cinematic intercept effect */}
+          <pointLight position={exp.position} color="#ffffff" intensity={2} distance={5} />
+        </group>
       ))}
 
+      {/* Ground impact markers - dim orange circles for targets that hit the ground */}
+      {targets
+        .filter(t => !interceptedTargetIds.has(t.id) && t.position.z >= 0 && t.position.z <= 10)
+        .map(t => (
+          <mesh
+            key={`impact-${t.id}`}
+            position={[t.position.x * SCALE, 0.01, -t.position.y * SCALE]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <ringGeometry args={[0.05, 0.15, 32]} />
+            <meshBasicMaterial color="#ff8c00" transparent opacity={0.7} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+
       {/* Starfield background */}
-      <Stars radius={100} depth={50} count={2000} factor={3} saturation={0} fade speed={1} />
+      <Stars radius={100} depth={50} count={2000} factor={6} saturation={0} fade speed={1} />
 
       {/* Post-processing bloom for emissive glow */}
       <EffectComposer>
