@@ -22,10 +22,13 @@ import type { CameraMode } from './components/CameraController';
 import { ReplayTheater } from './components/ReplayTheater';
 import { ScenarioBriefing, ScenarioDebrief } from './components/ScenarioBriefing';
 import { SplashScreen } from './components/SplashScreen';
+import { WelcomeModal } from './components/WelcomeModal';
+import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { NARRATIVE_SCENARIOS, calculateScore } from './data/scenarios';
 import type { NarrativeScenario } from './data/scenarios';
 import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useMissionPlanner } from './components/MissionPlanner';
 import './App.css';
 
@@ -122,8 +125,18 @@ function App() {
   // Mission Planner state
   const missionPlanner = useMissionPlanner();
 
-  // Check if simulation is running
+  // Keyboard shortcuts
   const isRunning = state?.status === 'running';
+  const { showHelp, setShowHelp, shortcuts } = useKeyboardShortcuts({
+    isRunning,
+    onLaunch: () => {}, // Launch is handled via ControlPanel
+    onStop: stopRun,
+    onToggleRecording: () => isRecording ? stopRecording() : startRecording(),
+    onCameraMode: (mode) => setCameraMode(mode as CameraMode),
+    onToggleAdvanced: () => setShowAdvanced(prev => !prev),
+  });
+
+  // Check if simulation is running
   const isReplayActive = !!replayState;
 
   // Use planner's entity selection when not running, our own when running
@@ -316,6 +329,14 @@ function App() {
           connected={connected}
           onComplete={() => setShowSplash(false)}
         />
+      )}
+
+      {/* Welcome onboarding (first visit) */}
+      {!showSplash && <WelcomeModal />}
+
+      {/* Keyboard shortcuts overlay */}
+      {showHelp && (
+        <KeyboardShortcutsPanel shortcuts={shortcuts} onClose={() => setShowHelp(false)} />
       )}
 
       <header className="app-header">

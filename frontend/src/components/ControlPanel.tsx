@@ -1,13 +1,18 @@
 /**
- * Control Panel - Mission Control Toolbar
+ * ControlPanel — Thin orchestration wrapper
  *
- * Compact horizontal layout with:
- * 1. Main controls in header (scenario, guidance, evasion, interceptors)
- * 2. Floating telemetry HUD overlay
- * 3. Expandable advanced panel for Monte Carlo, Envelope, etc.
+ * Composes MissionToolbar (top bar), MissionStatusHUD (bottom
+ * overlay), and AdvancedPanel (slide-out sidebar). Owns form state
+ * and data-fetching side-effects.
+ *
+ * Decomposed from the original 1,315-line monolith into focused
+ * sub-components under components/panels/.
  */
 
 import { useState, useEffect } from 'react';
+import { MissionToolbar } from './MissionToolbar';
+import { MissionStatusHUD } from './MissionStatusHUD';
+import { AdvancedPanel } from './AdvancedPanel';
 import type {
   SimStateEvent,
   Scenario,
@@ -19,17 +24,13 @@ import type {
   ThreatAssessment,
   RecordingMetadata,
   ReplayState,
-  //
   WTAAlgorithm,
   AssignmentResult,
-  //
   EnvironmentState,
   CooperativeState,
   EngagementZoneCreateRequest,
   HandoffRequestCreate,
-  // ML
   MLStatus,
-  //
   SwarmStatus,
   SwarmConfig,
   FormationInfo,
@@ -53,16 +54,13 @@ interface ControlPanelProps {
     navConstant: number;
     evasion: string;
     numInterceptors: number;
-    numTargets?: number;  //
-    wtaAlgorithm?: string;  //
-    // Environment
+    numTargets?: number;
+    wtaAlgorithm?: string;
     windSpeed?: number;
     windDirection?: number;
     windGusts?: number;
     enableDrag?: boolean;
-    // Cooperative
     enableCooperative?: boolean;
-    //
     enableSwarm?: boolean;
     swarmFormation?: FormationType;
     swarmSpacing?: number;
@@ -107,38 +105,30 @@ interface ControlPanelProps {
   onStopReplay: () => void;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
-  // WTA
   wtaAlgorithms: WTAAlgorithm[];
   assignments: AssignmentResult | null;
   onFetchAssignments: (algorithm?: string) => void;
-  // Environment
   environmentState: EnvironmentState | null;
-  // Sensor tracks
   onFetchSensorTracks?: () => void;
-  // Cooperative Engagement
   cooperativeState?: CooperativeState | null;
   onFetchCooperativeState?: () => void;
   onCreateEngagementZone?: (zone: EngagementZoneCreateRequest) => void;
   onDeleteEngagementZone?: (zoneId: string) => void;
   onAssignInterceptorToZone?: (interceptorId: string, zoneId: string) => void;
   onRequestHandoff?: (request: HandoffRequestCreate) => void;
-  // Mission Planner (props passed through but not used in ControlPanel)
   plannerMode?: string;
   onSetPlannerMode?: (mode: string) => void;
   plannedEntities?: { id: string; type: string; position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } }[];
   plannedZones?: { id: string; name: string; center: { x: number; y: number; z: number }; dimensions: { x: number; y: number; z: number }; color: string }[];
   onClearPlanner?: () => void;
   onRemovePlannedEntity?: (id: string) => void;
-  // ML
   mlStatus?: MLStatus | null;
   onFetchMLStatus?: () => void;
-  // Swarm
   swarmStatus?: SwarmStatus | null;
   formationTypes?: FormationInfo[];
   onFetchSwarmStatus?: () => void;
   onConfigureSwarm?: (config: Partial<SwarmConfig>) => void;
   onSetSwarmFormation?: (formation: FormationType) => void;
-  // HMT
   hmtStatus?: HMTStatus | null;
   authorityLevels?: AuthorityLevelInfo[];
   pendingActions?: PendingAction[];
@@ -150,1165 +140,149 @@ interface ControlPanelProps {
   onConfigureHMT?: (config: Partial<HMTConfig>) => void;
 }
 
-export function ControlPanel({
-  connected,
-  state,
-  scenarios,
-  guidanceLaws,
-  evasionTypes,
-  onStart,
-  onStop,
-  onRunMonteCarlo,
-  onRunEnvelope,
-  monteCarloLoading,
-  envelopeLoading,
-  interceptGeometry,
-  threatAssessment,
-  onFetchInterceptGeometry,
-  onFetchThreatAssessment,
-  isRecording,
-  recordings,
-  onStartRecording,
-  onStopRecording,
-  onDeleteRecording,
-  replayState,
-  onStartReplay,
-  onPauseReplay,
-  onResumeReplay,
-  onStopReplay,
-  showAdvanced,
-  onToggleAdvanced,
-  //
-  wtaAlgorithms,
-  assignments,
-  onFetchAssignments,
-  //
-  environmentState,
-  onFetchSensorTracks,
-  // Cooperative
-  cooperativeState,
-  onFetchCooperativeState,
-  onCreateEngagementZone,
-  onDeleteEngagementZone: _onDeleteEngagementZone,  // Reserved for future UI
-  onAssignInterceptorToZone: _onAssignInterceptorToZone,  // Reserved for future UI
-  onRequestHandoff: _onRequestHandoff,  // Reserved for future UI
-  // Mission Planner (not used in ControlPanel, passed from App)
-  plannerMode: _plannerMode,
-  onSetPlannerMode: _onSetPlannerMode,
-  plannedEntities: _plannedEntities,
-  plannedZones: _plannedZones,
-  onClearPlanner: _onClearPlanner,
-  onRemovePlannedEntity: _onRemovePlannedEntity,
-  // ML
-  mlStatus,
-  onFetchMLStatus,
-  // Swarm
-  swarmStatus,
-  formationTypes,
-  onFetchSwarmStatus,
-  onConfigureSwarm,
-  onSetSwarmFormation,
-  // HMT
-  hmtStatus,
-  authorityLevels,
-  pendingActions,
-  onFetchHMTStatus,
-  onFetchPendingActions,
-  onApproveAction,
-  onRejectAction,
-  onSetAuthorityLevel,
-  onConfigureHMT: _onConfigureHMT,  // Reserved for future
-}: ControlPanelProps) {
-  // Suppress unused warnings for reserved handlers
-  void _onDeleteEngagementZone;
-  void _onAssignInterceptorToZone;
-  void _onRequestHandoff;
-  void _plannerMode;
-  void _onSetPlannerMode;
-  void _plannedEntities;
-  void _plannedZones;
-  void _onClearPlanner;
-  void _onRemovePlannedEntity;
-  void _onConfigureHMT;
+export function ControlPanel(props: ControlPanelProps) {
+  const {
+    connected, state, scenarios, guidanceLaws, evasionTypes,
+    onStart, onStop, onRunMonteCarlo, onRunEnvelope,
+    monteCarloLoading, envelopeLoading,
+    interceptGeometry, threatAssessment,
+    onFetchInterceptGeometry, onFetchThreatAssessment,
+    isRecording, recordings, onStartRecording, onStopRecording, onDeleteRecording,
+    replayState, onStartReplay, onPauseReplay, onResumeReplay, onStopReplay,
+    showAdvanced, onToggleAdvanced,
+    wtaAlgorithms, assignments, onFetchAssignments,
+    environmentState, onFetchSensorTracks,
+    cooperativeState, onFetchCooperativeState, onCreateEngagementZone,
+    mlStatus, onFetchMLStatus,
+    swarmStatus, formationTypes, onFetchSwarmStatus, onConfigureSwarm, onSetSwarmFormation,
+    hmtStatus, authorityLevels, pendingActions,
+    onFetchHMTStatus, onFetchPendingActions,
+    onApproveAction, onRejectAction, onSetAuthorityLevel, onConfigureHMT,
+  } = props;
+
+  // ── Local form state ──────────────────────────────────────────
   const [selectedScenario, setSelectedScenario] = useState('head_on');
   const [selectedGuidance, setSelectedGuidance] = useState('proportional_nav');
   const [navConstant, setNavConstant] = useState(4.0);
   const [selectedEvasion, setSelectedEvasion] = useState('none');
   const [numInterceptors, setNumInterceptors] = useState(1);
-  const [numTargets, setNumTargets] = useState(1);  //
-  const [selectedWTA, setSelectedWTA] = useState('hungarian');  // Default to optimal
-  // Environment state
-  const [windSpeed, setWindSpeed] = useState(0);  // m/s
-  const [windDirection, setWindDirection] = useState(0);  // degrees
-  const [windGusts, setWindGusts] = useState(0);  // m/s
+  const [numTargets, setNumTargets] = useState(1);
+  const [selectedWTA, setSelectedWTA] = useState('hungarian');
+  const [windSpeed, setWindSpeed] = useState(0);
+  const [windDirection, setWindDirection] = useState(0);
+  const [windGusts, setWindGusts] = useState(0);
   const [enableDrag, setEnableDrag] = useState(false);
-  // Cooperative state
   const [enableCooperative, setEnableCooperative] = useState(false);
-  // Swarm state
   const [enableSwarm, setEnableSwarm] = useState(false);
   const [swarmFormation, setSwarmFormation] = useState<FormationType>('line_abreast');
   const [swarmSpacing, setSwarmSpacing] = useState(100);
-  // HMT state
   const [enableHmt, setEnableHmt] = useState(false);
   const [hmtAuthorityLevel, setHmtAuthorityLevel] = useState<AuthorityLevel>('human_on_loop');
-  // Other (enable via Swarm panel for simplicity)
-  const [enableDatalink, _setEnableDatalink] = useState(false);
-  const [enableTerrain, _setEnableTerrain] = useState(false);
-  void _setEnableDatalink;
-  void _setEnableTerrain;
-  const [mcResults, setMcResults] = useState<MonteCarloResults | null>(null);
-  const [envelopeResults, setEnvelopeResults] = useState<EnvelopeResults | null>(null);
-  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [enableDatalink] = useState(false);
+  const [enableTerrain] = useState(false);
 
   const isRunning = state?.status === 'running';
-  const targets = state?.entities.filter((e) => e.type === 'target') || [];  //
-  const target = targets[0];  // Backward compat
-  const interceptors = state?.entities.filter((e) => e.type === 'interceptor') || [];
 
-  // Auto-fetch geometry data during simulation
+  // ── Side-effects ──────────────────────────────────────────────
   useEffect(() => {
-    if (isRunning) {
-      const interval = setInterval(() => {
-        onFetchInterceptGeometry();
-        onFetchThreatAssessment();
-        // Also fetch WTA assignments for multi-target scenarios
-        if (numTargets > 1) {
-          onFetchAssignments(selectedWTA);
-        }
-        // Fetch sensor tracks for uncertainty visualization
-        if (onFetchSensorTracks) {
-          onFetchSensorTracks();
-        }
-        // Fetch cooperative state
-        if (onFetchCooperativeState && enableCooperative) {
-          onFetchCooperativeState();
-        }
-        // Fetch swarm status
-        if (onFetchSwarmStatus && enableSwarm) {
-          onFetchSwarmStatus();
-        }
-        // Fetch HMT status and pending actions
-        if (enableHmt) {
-          if (onFetchHMTStatus) onFetchHMTStatus();
-          if (onFetchPendingActions) onFetchPendingActions();
-        }
-      }, 200);
-      return () => clearInterval(interval);
-    }
+    if (!isRunning) return;
+    const interval = setInterval(() => {
+      onFetchInterceptGeometry();
+      onFetchThreatAssessment();
+      if (numTargets > 1) onFetchAssignments(selectedWTA);
+      if (onFetchSensorTracks) onFetchSensorTracks();
+      if (onFetchCooperativeState && enableCooperative) onFetchCooperativeState();
+      if (onFetchSwarmStatus && enableSwarm) onFetchSwarmStatus();
+      if (enableHmt) {
+        if (onFetchHMTStatus) onFetchHMTStatus();
+        if (onFetchPendingActions) onFetchPendingActions();
+      }
+    }, 200);
+    return () => clearInterval(interval);
   }, [isRunning, onFetchInterceptGeometry, onFetchThreatAssessment, onFetchAssignments, numTargets, selectedWTA, onFetchSensorTracks, onFetchCooperativeState, enableCooperative, onFetchSwarmStatus, enableSwarm, onFetchHMTStatus, onFetchPendingActions, enableHmt]);
 
-  // Update numTargets and evasion when scenario changes
   useEffect(() => {
     const scenario = scenarios[selectedScenario];
     if (scenario) {
-      // Update targets if scenario has multi-target settings
-      if (scenario.num_targets) {
-        setNumTargets(scenario.num_targets);
-      }
-      // Update evasion to match scenario preset
-      if (scenario.evasion && scenario.evasion !== 'none') {
-        setSelectedEvasion(scenario.evasion);
-      }
+      if (scenario.num_targets) setNumTargets(scenario.num_targets);
+      if (scenario.evasion && scenario.evasion !== 'none') setSelectedEvasion(scenario.evasion);
     }
   }, [selectedScenario, scenarios]);
 
-  const handleStart = () => {
+  // ── Handlers ──────────────────────────────────────────────────
+  const handleLaunch = () => {
     onStart({
-      scenario: selectedScenario,
-      guidance: selectedGuidance,
-      navConstant,
-      evasion: selectedEvasion,
-      numInterceptors,
-      numTargets,  //
-      wtaAlgorithm: selectedWTA,  //
-      // Environment
-      windSpeed,
-      windDirection,
-      windGusts,
-      enableDrag,
-      // Cooperative
-      enableCooperative,
-      //
-      enableSwarm,
-      swarmFormation,
-      swarmSpacing,
-      enableHmt,
-      hmtAuthorityLevel,
-      enableDatalink,
-      enableTerrain,
+      scenario: selectedScenario, guidance: selectedGuidance, navConstant,
+      evasion: selectedEvasion, numInterceptors, numTargets,
+      wtaAlgorithm: selectedWTA,
+      windSpeed, windDirection, windGusts, enableDrag, enableCooperative,
+      enableSwarm, swarmFormation, swarmSpacing,
+      enableHmt, hmtAuthorityLevel, enableDatalink, enableTerrain,
     });
   };
 
-  const handleRunMonteCarlo = async () => {
-    const results = await onRunMonteCarlo({
-      scenario: selectedScenario,
-      guidance: selectedGuidance,
-      navConstant,
-      numRuns: 100,
-      killRadius: 50,
-      positionNoiseStd: 50,
-      velocityNoiseStd: 5,
-    });
-    setMcResults(results);
-  };
-
-  const handleRunEnvelope = async () => {
-    const results = await onRunEnvelope({
-      guidance: selectedGuidance,
-      nav_constant: navConstant,
-      evasion: selectedEvasion,
-      range_steps: 8,
-      bearing_steps: 10,
-      runs_per_point: 5,
-    });
-    setEnvelopeResults(results);
-  };
-
-  const togglePanel = (panel: string) => {
-    setActivePanel(activePanel === panel ? null : panel);
-  };
-
+  // ── Render ────────────────────────────────────────────────────
   return (
     <>
-      {/* Main Toolbar Controls */}
-      <div className="mission-toolbar">
-        <div className="toolbar-group">
-          <label>SCENARIO</label>
-          <select
-            value={selectedScenario}
-            onChange={(e) => setSelectedScenario(e.target.value)}
-            disabled={isRunning}
-          >
-            {Object.entries(scenarios).map(([name, info]) => (
-              <option key={name} value={name} title={info.description}>
-                {name.replace('_', ' ').toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </div>
+      <MissionToolbar
+        connected={connected} isRunning={isRunning}
+        selectedScenario={selectedScenario} selectedGuidance={selectedGuidance}
+        navConstant={navConstant} selectedEvasion={selectedEvasion}
+        numInterceptors={numInterceptors} numTargets={numTargets} selectedWTA={selectedWTA}
+        scenarios={scenarios} guidanceLaws={guidanceLaws}
+        evasionTypes={evasionTypes} wtaAlgorithms={wtaAlgorithms}
+        onScenario={setSelectedScenario} onGuidance={setSelectedGuidance}
+        onNavConstant={setNavConstant} onEvasion={setSelectedEvasion}
+        onNumInterceptors={setNumInterceptors} onNumTargets={setNumTargets} onWTA={setSelectedWTA}
+        onLaunch={handleLaunch} onAbort={onStop}
+        isRecording={isRecording}
+        onToggleRecording={isRecording ? onStopRecording : onStartRecording}
+        showAdvanced={showAdvanced} onToggleAdvanced={onToggleAdvanced}
+      />
 
-        <div className="toolbar-group">
-          <label>GUIDANCE</label>
-          <select
-            value={selectedGuidance}
-            onChange={(e) => setSelectedGuidance(e.target.value)}
-            disabled={isRunning}
-          >
-            {guidanceLaws.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      <MissionStatusHUD
+        state={state}
+        interceptGeometry={interceptGeometry}
+        threatAssessment={threatAssessment}
+        assignments={assignments}
+        replayState={replayState}
+        onPauseReplay={onPauseReplay}
+        onResumeReplay={onResumeReplay}
+        onStopReplay={onStopReplay}
+      />
 
-        {selectedGuidance !== 'pure_pursuit' && (
-          <div className="toolbar-group nav-group">
-            <label>N={navConstant.toFixed(1)}</label>
-            <input
-              type="range"
-              min="1"
-              max="8"
-              step="0.5"
-              value={navConstant}
-              onChange={(e) => setNavConstant(parseFloat(e.target.value))}
-              disabled={isRunning}
-            />
-          </div>
-        )}
-
-        <div className="toolbar-group">
-          <label>EVASION</label>
-          <select
-            value={selectedEvasion}
-            onChange={(e) => setSelectedEvasion(e.target.value)}
-            disabled={isRunning}
-          >
-            {evasionTypes.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="toolbar-group interceptor-group">
-          <label>INT: {numInterceptors}</label>
-          <input
-            type="range"
-            min="1"
-            max="8"
-            step="1"
-            value={numInterceptors}
-            onChange={(e) => setNumInterceptors(parseInt(e.target.value))}
-            disabled={isRunning}
-          />
-        </div>
-
-        {/* Phase 5: Targets slider */}
-        <div className="toolbar-group target-group">
-          <label>TGT: {numTargets}</label>
-          <input
-            type="range"
-            min="1"
-            max="4"
-            step="1"
-            value={numTargets}
-            onChange={(e) => setNumTargets(parseInt(e.target.value))}
-            disabled={isRunning}
-          />
-        </div>
-
-        {/* Phase 5: WTA algorithm selector (show when multiple targets) */}
-        {numTargets > 1 && (
-          <div className="toolbar-group">
-            <label>WTA</label>
-            <select
-              value={selectedWTA}
-              onChange={(e) => setSelectedWTA(e.target.value)}
-              disabled={isRunning}
-            >
-              {wtaAlgorithms.map((alg) => (
-                <option key={alg.id} value={alg.id} title={alg.description}>
-                  {alg.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="toolbar-actions">
-          {!isRunning ? (
-            <button className="btn-launch" onClick={handleStart} disabled={!connected}>
-              LAUNCH
-            </button>
-          ) : (
-            <button className="btn-abort" onClick={onStop}>
-              ABORT
-            </button>
-          )}
-
-          <button
-            className={`btn-record ${isRecording ? 'recording' : ''}`}
-            onClick={isRecording ? onStopRecording : onStartRecording}
-            title={isRecording ? 'Stop Recording' : 'Start Recording'}
-          >
-            {isRecording ? 'REC' : 'REC'}
-          </button>
-
-          <button
-            className={`btn-advanced ${showAdvanced ? 'active' : ''}`}
-            onClick={onToggleAdvanced}
-          >
-            ADV
-          </button>
-        </div>
-      </div>
-
-      {/* Telemetry HUD - Bottom overlay */}
-      <div className="telemetry-hud">
-        {/* Sim Status */}
-        <div className="hud-panel status-panel">
-          <div className="hud-title">MISSION</div>
-          <div className="hud-content">
-            <div className="hud-row">
-              <span className="hud-label">T+</span>
-              <span className="hud-value">{state ? state.sim_time.toFixed(1) : '0.0'}s</span>
-            </div>
-            <div className="hud-row">
-              <span className="hud-label">STATUS</span>
-              <span className={`hud-value status-${state?.status || 'ready'}`}>
-                {state?.status?.toUpperCase() || 'READY'}
-              </span>
-            </div>
-            {state?.result && state.result !== 'pending' && (
-              <div className="hud-row">
-                <span className="hud-label">RESULT</span>
-                <span className={`hud-value result-${state.result}`}>
-                  {state.result.toUpperCase()}
-                </span>
-              </div>
-            )}
-            <div className="hud-row">
-              <span className="hud-label">MISS</span>
-              <span className="hud-value">{state ? state.miss_distance.toFixed(0) : '---'}m</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Target Telemetry */}
-        {target && (
-          <div className="hud-panel target-panel">
-            <div className="hud-title target">TGT</div>
-            <div className="hud-content">
-              <div className="hud-row">
-                <span className="hud-label">POS</span>
-                <span className="hud-value mono">
-                  {target.position.x.toFixed(0)}, {target.position.y.toFixed(0)}
-                </span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">SPD</span>
-                <span className="hud-value">{target.speed.toFixed(0)} m/s</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Interceptor Telemetry with assigned target geometry */}
-        {interceptors.slice(0, 4).map((int) => {
-          // Find the assignment for this interceptor
-          const assignment = assignments?.assignments.find(a => a.interceptor_id === int.id);
-          const assignedTargetId = assignment?.target_id;
-
-          // Find geometry for this interceptor's assigned target only
-          const geom = interceptGeometry?.find(
-            g => g.interceptor_id === int.id &&
-                 (assignedTargetId ? g.target_id === assignedTargetId : true)
-          );
-
-          // Check if this interceptor has hit its target
-          const hasHit = state?.intercepted_pairs?.some(pair => pair[0] === int.id);
-
-          return (
-            <div key={int.id} className={`hud-panel interceptor-panel ${hasHit ? 'interceptor-hit' : ''}`}>
-              <div className="hud-title interceptor">
-                {int.id}
-                {assignedTargetId && <span className="assigned-target">→{assignedTargetId}</span>}
-              </div>
-              <div className="hud-content">
-                {hasHit ? (
-                  <div className="hud-row">
-                    <span className="hud-label">STATUS</span>
-                    <span className="hud-value result-intercept">HIT</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="hud-row">
-                      <span className="hud-label">SPD</span>
-                      <span className="hud-value">{int.speed.toFixed(0)} m/s</span>
-                    </div>
-                    {geom && (
-                      <>
-                        <div className="hud-row">
-                          <span className="hud-label">RNG</span>
-                          <span className="hud-value">{(geom.los_range / 1000).toFixed(2)} km</span>
-                        </div>
-                        <div className="hud-row">
-                          <span className="hud-label">TTI</span>
-                          <span className="hud-value">
-                            {geom.time_to_intercept >= 0 ? `${geom.time_to_intercept.toFixed(1)}s` : '---'}
-                          </span>
-                        </div>
-                        <div className="hud-row">
-                          <span className="hud-label">Vc</span>
-                          <span className="hud-value">{geom.closing_velocity.toFixed(0)} m/s</span>
-                        </div>
-                        <div className="hud-row">
-                          <span className="hud-label">COL</span>
-                          <span className={`hud-value ${geom.collision_course ? 'result-intercept' : 'result-missed'}`}>
-                            {geom.collision_course ? 'YES' : 'NO'}
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Threat Panel */}
-        {threatAssessment && threatAssessment.length > 0 && threatAssessment[0].threats.length > 0 && (
-          <div className="hud-panel threat-panel">
-            <div className={`hud-title threat-${threatAssessment[0].threats[0].threat_level}`}>
-              THREAT
-            </div>
-            <div className="hud-content">
-              <div className="hud-row">
-                <span className="hud-label">LVL</span>
-                <span className={`hud-value threat-${threatAssessment[0].threats[0].threat_level}`}>
-                  {threatAssessment[0].threats[0].threat_level.toUpperCase()}
-                </span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">SCR</span>
-                <span className="hud-value">{threatAssessment[0].threats[0].total_score.toFixed(0)}</span>
-              </div>
-              <div className="hud-row">
-                <span className="hud-label">REC</span>
-                <span className="hud-value">{threatAssessment[0].engagement_recommendation.toUpperCase()}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Phase 5: WTA Assignments Panel */}
-        {assignments && assignments.assignments.length > 0 && targets.length > 1 && (
-          <div className="hud-panel wta-panel">
-            <div className="hud-title">WTA</div>
-            <div className="hud-content">
-              <div className="hud-row">
-                <span className="hud-label">ALGO</span>
-                <span className="hud-value">{assignments.algorithm.split('_').join(' ').toUpperCase()}</span>
-              </div>
-              {assignments.assignments.slice(0, 3).map((a) => (
-                <div key={a.interceptor_id} className="hud-row">
-                  <span className="hud-label">{a.interceptor_id}</span>
-                  <span className="hud-value">{a.target_id}</span>
-                </div>
-              ))}
-              {assignments.unassigned_targets.length > 0 && (
-                <div className="hud-row">
-                  <span className="hud-label">UNASGN</span>
-                  <span className="hud-value result-missed">{assignments.unassigned_targets.join(', ')}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Phase 5: Multi-target summary */}
-        {targets.length > 1 && state?.intercepted_pairs && state.intercepted_pairs.length > 0 && (
-          <div className="hud-panel intercepts-panel">
-            <div className="hud-title result-intercept">KILLS</div>
-            <div className="hud-content">
-              {state.intercepted_pairs.map(([intId, tgtId]) => (
-                <div key={`${intId}-${tgtId}`} className="hud-row">
-                  <span className="hud-label">{intId}</span>
-                  <span className="hud-value result-intercept">{tgtId}</span>
-                </div>
-              ))}
-              <div className="hud-row">
-                <span className="hud-label">TOTAL</span>
-                <span className="hud-value">{state.intercepted_pairs.length}/{targets.length}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Replay Controls */}
-        {replayState && (
-          <div className="hud-panel replay-panel">
-            <div className="hud-title">REPLAY</div>
-            <div className="hud-content">
-              <div className="replay-progress">
-                {replayState.current_tick}/{replayState.total_ticks}
-              </div>
-              <div className="replay-controls">
-                {replayState.is_paused ? (
-                  <button onClick={onResumeReplay} className="btn-small">PLAY</button>
-                ) : (
-                  <button onClick={onPauseReplay} className="btn-small">PAUSE</button>
-                )}
-                <button onClick={onStopReplay} className="btn-small">STOP</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Advanced Panel - Slide out */}
       {showAdvanced && (
-        <div className="advanced-panel">
-          <div className="advanced-tabs">
-            <button
-              className={activePanel === 'montecarlo' ? 'active' : ''}
-              onClick={() => togglePanel('montecarlo')}
-            >
-              Monte Carlo
-            </button>
-            <button
-              className={activePanel === 'envelope' ? 'active' : ''}
-              onClick={() => togglePanel('envelope')}
-            >
-              Envelope
-            </button>
-            <button
-              className={activePanel === 'environment' ? 'active' : ''}
-              onClick={() => togglePanel('environment')}
-            >
-              Environment
-            </button>
-            <button
-              className={activePanel === 'recordings' ? 'active' : ''}
-              onClick={() => togglePanel('recordings')}
-            >
-              Recordings ({recordings.length})
-            </button>
-            <button
-              className={activePanel === 'ml' ? 'active' : ''}
-              onClick={() => {
-                togglePanel('ml');
-                if (onFetchMLStatus) onFetchMLStatus();
-              }}
-            >
-              ML/AI
-            </button>
-            <button
-              className={activePanel === 'swarm' ? 'active' : ''}
-              onClick={() => {
-                togglePanel('swarm');
-                if (onFetchSwarmStatus) onFetchSwarmStatus();
-              }}
-            >
-              Swarm
-            </button>
-            <button
-              className={activePanel === 'hmt' ? 'active' : ''}
-              onClick={() => {
-                togglePanel('hmt');
-                if (onFetchHMTStatus) onFetchHMTStatus();
-                if (onFetchPendingActions) onFetchPendingActions();
-              }}
-            >
-              HMT {pendingActions && pendingActions.length > 0 ? `(${pendingActions.length})` : ''}
-            </button>
-          </div>
-
-          {/* Monte Carlo Content */}
-          {activePanel === 'montecarlo' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Run 100 simulations with noise to test robustness</p>
-              <button
-                onClick={handleRunMonteCarlo}
-                disabled={monteCarloLoading}
-                className="btn-action"
-              >
-                {monteCarloLoading ? 'Running...' : 'Run Monte Carlo'}
-              </button>
-
-              {mcResults && (
-                <div className="mc-results">
-                  <div className="results-grid">
-                    <div className="result-item">
-                      <span className="result-label">Pk</span>
-                      <span className={mcResults.intercept_rate > 0.8 ? 'result-good' : 'result-bad'}>
-                        {(mcResults.intercept_rate * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="result-item">
-                      <span className="result-label">Mean</span>
-                      <span>{mcResults.mean_miss_distance.toFixed(1)}m</span>
-                    </div>
-                    <div className="result-item">
-                      <span className="result-label">StdDev</span>
-                      <span>{mcResults.std_miss_distance.toFixed(1)}m</span>
-                    </div>
-                    <div className="result-item">
-                      <span className="result-label">Range</span>
-                      <span>{mcResults.min_miss_distance.toFixed(0)}-{mcResults.max_miss_distance.toFixed(0)}m</span>
-                    </div>
-                  </div>
-                  <div className="histogram">
-                    {mcResults.miss_distance_histogram.counts.map((count, i) => {
-                      const maxCount = Math.max(...mcResults.miss_distance_histogram.counts);
-                      const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-                      return (
-                        <div
-                          key={i}
-                          className="hist-bar"
-                          style={{ height: `${height}%` }}
-                          title={`${mcResults.miss_distance_histogram.bin_edges[i].toFixed(0)}-${mcResults.miss_distance_histogram.bin_edges[i + 1].toFixed(0)}m: ${count}`}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Envelope Content */}
-          {activePanel === 'envelope' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Compute intercept probability across range and bearing</p>
-              <button
-                onClick={handleRunEnvelope}
-                disabled={envelopeLoading}
-                className="btn-action"
-              >
-                {envelopeLoading ? 'Computing...' : 'Compute Envelope'}
-              </button>
-
-              {envelopeResults && (
-                <div className="envelope-results">
-                  <div className="heatmap">
-                    {envelopeResults.heatmap_2d.data.map((row, ri) => (
-                      <div key={ri} className="heatmap-row">
-                        {row.map((value, ci) => {
-                          const hue = value * 120;
-                          return (
-                            <div
-                              key={ci}
-                              className="heatmap-cell"
-                              style={{ backgroundColor: `hsl(${hue}, 80%, 40%)` }}
-                              title={`R:${envelopeResults.range_values[ri].toFixed(0)}m B:${envelopeResults.bearing_values[ci].toFixed(0)}° Pk:${(value * 100).toFixed(0)}%`}
-                            />
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="heatmap-legend">
-                    <span>0%</span>
-                    <div className="gradient-bar" />
-                    <span>100%</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Environment Content */}
-          {activePanel === 'environment' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Configure wind and atmospheric drag effects</p>
-
-              <div className="env-controls">
-                <div className="env-row">
-                  <label>Wind Speed: {windSpeed} m/s</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="50"
-                    step="1"
-                    value={windSpeed}
-                    onChange={(e) => setWindSpeed(parseInt(e.target.value))}
-                    disabled={isRunning}
-                  />
-                </div>
-
-                <div className="env-row">
-                  <label>Wind Direction: {windDirection}°</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="15"
-                    value={windDirection}
-                    onChange={(e) => setWindDirection(parseInt(e.target.value))}
-                    disabled={isRunning}
-                  />
-                  <span className="wind-compass">
-                    {windDirection === 0 ? 'N' : windDirection === 90 ? 'E' : windDirection === 180 ? 'S' : windDirection === 270 ? 'W' : `${windDirection}°`}
-                  </span>
-                </div>
-
-                <div className="env-row">
-                  <label>Wind Gusts: {windGusts} m/s</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="20"
-                    step="1"
-                    value={windGusts}
-                    onChange={(e) => setWindGusts(parseInt(e.target.value))}
-                    disabled={isRunning}
-                  />
-                </div>
-
-                <div className="env-row checkbox-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={enableDrag}
-                      onChange={(e) => setEnableDrag(e.target.checked)}
-                      disabled={isRunning}
-                    />
-                    Enable Atmospheric Drag
-                  </label>
-                </div>
-
-                <div className="env-row checkbox-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={enableCooperative}
-                      onChange={(e) => setEnableCooperative(e.target.checked)}
-                      disabled={isRunning}
-                    />
-                    Enable Cooperative Engagement
-                  </label>
-                </div>
-              </div>
-
-              {/* Current environment state display */}
-              {environmentState && environmentState.enabled && (
-                <div className="env-state">
-                  <div className="env-state-title">Current Wind</div>
-                  <div className="env-state-row">
-                    <span>X: {environmentState.current_wind?.x.toFixed(1) || 0} m/s</span>
-                    <span>Y: {environmentState.current_wind?.y.toFixed(1) || 0} m/s</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Cooperative engagement controls */}
-              {enableCooperative && isRunning && cooperativeState?.enabled && (
-                <div className="env-state">
-                  <div className="env-state-title">Cooperative Engagement</div>
-                  <div className="env-state-row">
-                    <span>Zones: {cooperativeState?.engagement_zones?.length || 0}</span>
-                    <span>Handoffs: {cooperativeState?.pending_handoffs?.length || 0}</span>
-                  </div>
-                  <button
-                    className="btn-action"
-                    style={{ marginTop: '8px' }}
-                    onClick={() => {
-                      if (onCreateEngagementZone) {
-                        onCreateEngagementZone({
-                          name: `Zone ${(cooperativeState?.engagement_zones?.length || 0) + 1}`,
-                          center_x: 1500 + Math.random() * 500,
-                          center_y: 0,
-                          center_z: 600,
-                          width: 800,
-                          depth: 800,
-                          height: 400,
-                          rotation: 0,
-                          priority: 1,
-                          color: ['#00ff00', '#00ffff', '#ff00ff', '#ffff00'][
-                            (cooperativeState?.engagement_zones?.length || 0) % 4
-                          ],
-                        });
-                      }
-                    }}
-                  >
-                    + Add Engagement Zone
-                  </button>
-                </div>
-              )}
-
-              {/* Help text when cooperative enabled but not running */}
-              {enableCooperative && !isRunning && (
-                <div className="env-state">
-                  <div className="env-state-title">Cooperative Mode</div>
-                  <p className="panel-desc" style={{ margin: '4px 0' }}>
-                    Start a run to create engagement zones
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Recordings Content */}
-          {activePanel === 'recordings' && (
-            <div className="advanced-content">
-              {recordings.length > 0 ? (
-                <div className="recordings-list">
-                  {recordings.slice(0, 8).map((rec) => (
-                    <div key={rec.recording_id} className="recording-row">
-                      <div className="rec-info">
-                        <span className="rec-name">{rec.scenario_name}</span>
-                        <span className={`rec-result result-${rec.result}`}>{rec.result}</span>
-                        <span className="rec-time">{rec.total_sim_time.toFixed(1)}s</span>
-                      </div>
-                      <div className="rec-actions">
-                        <button onClick={() => onStartReplay(rec.recording_id)}>PLAY</button>
-                        <button onClick={() => onDeleteRecording(rec.recording_id)}>DEL</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="panel-desc">No recordings. Start recording during simulation.</p>
-              )}
-            </div>
-          )}
-
-          {/* ML/AI Content */}
-          {activePanel === 'ml' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Neural network threat assessment and RL guidance policies</p>
-
-              <div className="ml-status">
-                <div className="ml-status-row">
-                  <span className="hud-label">ONNX Runtime</span>
-                  <span className={`hud-value ${mlStatus?.onnx_available ? 'result-intercept' : 'result-missed'}`}>
-                    {mlStatus?.onnx_available ? 'AVAILABLE' : 'NOT INSTALLED'}
-                  </span>
-                </div>
-
-                {!mlStatus?.onnx_available && (
-                  <div className="ml-install-hint">
-                    <code>pip install onnxruntime</code>
-                  </div>
-                )}
-
-                <div className="ml-section">
-                  <div className="ml-section-title">Threat Models</div>
-                  {mlStatus?.models?.threat_models && mlStatus.models.threat_models.length > 0 ? (
-                    mlStatus.models.threat_models.map((model) => (
-                      <div key={model.model_id} className="ml-model-row">
-                        <span className="model-id">{model.model_id}</span>
-                        <span className={`model-status ${model.active ? 'active' : ''}`}>
-                          {model.active ? 'ACTIVE' : model.loaded ? 'LOADED' : 'UNLOADED'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="ml-no-models">No models loaded</div>
-                  )}
-                </div>
-
-                <div className="ml-section">
-                  <div className="ml-section-title">Guidance Models</div>
-                  {mlStatus?.models?.guidance_models && mlStatus.models.guidance_models.length > 0 ? (
-                    mlStatus.models.guidance_models.map((model) => (
-                      <div key={model.model_id} className="ml-model-row">
-                        <span className="model-id">{model.model_id}</span>
-                        <span className={`model-status ${model.active ? 'active' : ''}`}>
-                          {model.active ? 'ACTIVE' : model.loaded ? 'LOADED' : 'UNLOADED'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="ml-no-models">No models loaded</div>
-                  )}
-                </div>
-
-                <div className="ml-info">
-                  <p>Load ONNX models via API:</p>
-                  <code>POST /ml/models/load</code>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Swarm Content */}
-          {activePanel === 'swarm' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Configure swarm tactics and formations</p>
-
-              <div className="env-controls">
-                <div className="env-row checkbox-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={enableSwarm}
-                      onChange={(e) => setEnableSwarm(e.target.checked)}
-                      disabled={isRunning}
-                    />
-                    Enable Swarm Tactics
-                  </label>
-                </div>
-
-                {enableSwarm && (
-                  <>
-                    <div className="env-row">
-                      <label>Formation</label>
-                      <select
-                        value={swarmFormation}
-                        onChange={(e) => {
-                          setSwarmFormation(e.target.value as FormationType);
-                          if (isRunning && onSetSwarmFormation) {
-                            onSetSwarmFormation(e.target.value as FormationType);
-                          }
-                        }}
-                      >
-                        {formationTypes && formationTypes.length > 0 ? (
-                          formationTypes.map((f) => (
-                            <option key={f.id} value={f.id} title={f.description}>
-                              {f.name}
-                            </option>
-                          ))
-                        ) : (
-                          <>
-                            <option value="line_abreast">Line Abreast</option>
-                            <option value="echelon_right">Echelon Right</option>
-                            <option value="echelon_left">Echelon Left</option>
-                            <option value="v_formation">V-Formation</option>
-                            <option value="wedge">Wedge</option>
-                            <option value="trail">Trail</option>
-                            <option value="diamond">Diamond</option>
-                            <option value="swarm">Free Swarm</option>
-                          </>
-                        )}
-                      </select>
-                    </div>
-
-                    <div className="env-row">
-                      <label>Spacing: {swarmSpacing}m</label>
-                      <input
-                        type="range"
-                        min="50"
-                        max="500"
-                        step="25"
-                        value={swarmSpacing}
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value);
-                          setSwarmSpacing(value);
-                          if (isRunning && onConfigureSwarm) {
-                            onConfigureSwarm({ spacing: value });
-                          }
-                        }}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Swarm status during simulation */}
-                {isRunning && enableSwarm && swarmStatus?.enabled && (
-                  <div className="env-state">
-                    <div className="env-state-title">Swarm Status</div>
-                    <div className="env-state-row">
-                      <span>Leader: {swarmStatus.state?.leader_id || 'None'}</span>
-                    </div>
-                    <div className="env-state-row">
-                      <span>Formation: {swarmStatus.state?.formation || swarmFormation}</span>
-                    </div>
-                    <div className="env-state-row">
-                      <span>Error: {swarmStatus.state?.formation_error?.toFixed(1) || 0}m</span>
-                      <span>Cohesion: {((swarmStatus.state?.cohesion_metric || 0) * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Help text when swarm enabled but not running */}
-                {enableSwarm && !isRunning && (
-                  <div className="env-state">
-                    <div className="env-state-title">Swarm Mode</div>
-                    <p className="panel-desc" style={{ margin: '4px 0' }}>
-                      Interceptors will fly in {swarmFormation.replace('_', ' ')} formation
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* HMT Content */}
-          {activePanel === 'hmt' && (
-            <div className="advanced-content">
-              <p className="panel-desc">Human-Machine Teaming: Control automation authority</p>
-
-              <div className="env-controls">
-                <div className="env-row checkbox-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={enableHmt}
-                      onChange={(e) => setEnableHmt(e.target.checked)}
-                      disabled={isRunning}
-                    />
-                    Enable Human-Machine Teaming
-                  </label>
-                </div>
-
-                {enableHmt && (
-                  <div className="env-row">
-                    <label>Authority Level</label>
-                    <select
-                      value={hmtAuthorityLevel}
-                      onChange={(e) => {
-                        const level = e.target.value as AuthorityLevel;
-                        setHmtAuthorityLevel(level);
-                        if (isRunning && onSetAuthorityLevel) {
-                          onSetAuthorityLevel(level);
-                        }
-                      }}
-                    >
-                      {authorityLevels && authorityLevels.length > 0 ? (
-                        authorityLevels.map((a) => (
-                          <option key={a.id} value={a.id} title={a.description}>
-                            {a.name}
-                          </option>
-                        ))
-                      ) : (
-                        <>
-                          <option value="full_auto">Full Auto</option>
-                          <option value="human_on_loop">Human on Loop</option>
-                          <option value="human_in_loop">Human in Loop</option>
-                          <option value="manual">Manual</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-                )}
-
-                {/* HMT Status */}
-                {isRunning && enableHmt && hmtStatus?.enabled && (
-                  <div className="env-state">
-                    <div className="env-state-title">HMT Metrics</div>
-                    <div className="env-state-row">
-                      <span>Authority: {hmtStatus.metrics?.authority_level || hmtAuthorityLevel}</span>
-                    </div>
-                    <div className="env-state-row">
-                      <span>Workload: {hmtStatus.metrics?.workload.actions_per_minute?.toFixed(1) || 0}/min</span>
-                    </div>
-                    <div className="env-state-row">
-                      <span>Trust: {((hmtStatus.metrics?.trust.ai_accuracy || 0) * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Pending Actions */}
-                {isRunning && enableHmt && pendingActions && pendingActions.length > 0 && (
-                  <div className="env-state">
-                    <div className="env-state-title" style={{ color: '#ff9500' }}>
-                      Pending Actions ({pendingActions.length})
-                    </div>
-                    <div className="pending-actions-list">
-                      {pendingActions.slice(0, 5).map((action) => (
-                        <div key={action.action_id} className="pending-action">
-                          <div className="action-info">
-                            <span className="action-type">{action.action_type.toUpperCase()}</span>
-                            <span className="action-entity">{action.entity_id}</span>
-                            {action.target_id && (
-                              <span className="action-target">→ {action.target_id}</span>
-                            )}
-                            <span className="action-confidence">
-                              {(action.confidence * 100).toFixed(0)}%
-                            </span>
-                            <span className="action-timeout">
-                              {action.time_remaining.toFixed(1)}s
-                            </span>
-                          </div>
-                          <div className="action-buttons">
-                            <button
-                              className="btn-approve"
-                              onClick={() => onApproveAction && onApproveAction(action.action_id)}
-                            >
-                              ✓
-                            </button>
-                            <button
-                              className="btn-reject"
-                              onClick={() => onRejectAction && onRejectAction(action.action_id)}
-                            >
-                              ✗
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Authority Level Descriptions */}
-                {enableHmt && !isRunning && (
-                  <div className="env-state">
-                    <div className="env-state-title">Authority Levels</div>
-                    <div className="authority-descriptions">
-                      <div className={`auth-desc ${hmtAuthorityLevel === 'full_auto' ? 'active' : ''}`}>
-                        <strong>Full Auto:</strong> AI acts autonomously, human notified
-                      </div>
-                      <div className={`auth-desc ${hmtAuthorityLevel === 'human_on_loop' ? 'active' : ''}`}>
-                        <strong>Human on Loop:</strong> AI acts, human can override
-                      </div>
-                      <div className={`auth-desc ${hmtAuthorityLevel === 'human_in_loop' ? 'active' : ''}`}>
-                        <strong>Human in Loop:</strong> AI proposes, human approves
-                      </div>
-                      <div className={`auth-desc ${hmtAuthorityLevel === 'manual' ? 'active' : ''}`}>
-                        <strong>Manual:</strong> Human controls all actions
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        <AdvancedPanel
+          isRunning={isRunning}
+          selectedScenario={selectedScenario} selectedGuidance={selectedGuidance}
+          navConstant={navConstant} selectedEvasion={selectedEvasion}
+          onRunMonteCarlo={onRunMonteCarlo} onRunEnvelope={onRunEnvelope}
+          monteCarloLoading={monteCarloLoading} envelopeLoading={envelopeLoading}
+          recordings={recordings} onStartReplay={onStartReplay} onDeleteRecording={onDeleteRecording}
+          windSpeed={windSpeed} windDirection={windDirection} windGusts={windGusts}
+          enableDrag={enableDrag}
+          onWindSpeed={setWindSpeed} onWindDirection={setWindDirection}
+          onWindGusts={setWindGusts} onEnableDrag={setEnableDrag}
+          enableCooperative={enableCooperative} onEnableCooperative={setEnableCooperative}
+          environmentState={environmentState}
+          cooperativeState={cooperativeState} onCreateEngagementZone={onCreateEngagementZone}
+          mlStatus={mlStatus} onFetchMLStatus={onFetchMLStatus}
+          enableSwarm={enableSwarm} swarmFormation={swarmFormation} swarmSpacing={swarmSpacing}
+          onEnableSwarm={setEnableSwarm} onSwarmFormation={setSwarmFormation} onSwarmSpacing={setSwarmSpacing}
+          swarmStatus={swarmStatus} formationTypes={formationTypes}
+          onFetchSwarmStatus={onFetchSwarmStatus} onConfigureSwarm={onConfigureSwarm}
+          onSetSwarmFormation={onSetSwarmFormation}
+          enableHmt={enableHmt} hmtAuthorityLevel={hmtAuthorityLevel}
+          onEnableHmt={setEnableHmt}
+          onHmtAuthorityLevel={(level) => {
+            setHmtAuthorityLevel(level);
+            if (isRunning && onSetAuthorityLevel) onSetAuthorityLevel(level);
+          }}
+          hmtStatus={hmtStatus} authorityLevels={authorityLevels} pendingActions={pendingActions}
+          onFetchHMTStatus={onFetchHMTStatus} onFetchPendingActions={onFetchPendingActions}
+          onApproveAction={onApproveAction} onRejectAction={onRejectAction}
+          onSetAuthorityLevel={onSetAuthorityLevel} onConfigureHMT={onConfigureHMT}
+        />
       )}
     </>
   );
