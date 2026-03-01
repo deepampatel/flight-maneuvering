@@ -133,6 +133,29 @@ function App() {
   // Mission Planner state
   const missionPlanner = useMissionPlanner();
 
+  // Scene placement bridge (ScenarioBuilder → 3D scene → ScenarioBuilder)
+  const [scenePlacement, setScenePlacement] = useState<{
+    type: 'battery' | 'protected_area';
+    position: { x: number; y: number; z: number };
+  } | null>(null);
+
+  const handleRequestPlacement = useCallback((type: 'battery' | 'protected_area') => {
+    // Set mission planner to the placement mode so the 3D scene accepts clicks
+    missionPlanner.setMode(type);
+    // Auto-open builder so user can see the result
+    setBuilderOpen(true);
+  }, [missionPlanner]);
+
+  const handleScenePlacement = useCallback((type: 'battery' | 'protected_area', position: { x: number; y: number; z: number }) => {
+    setScenePlacement({ type, position });
+    // Reset mode back to view after placement
+    missionPlanner.setMode('view');
+  }, [missionPlanner]);
+
+  const handlePlacementConsumed = useCallback(() => {
+    setScenePlacement(null);
+  }, []);
+
   // Keyboard shortcuts
   const isRunning = state?.status === 'running';
   const { showHelp, setShowHelp, shortcuts } = useKeyboardShortcuts({
@@ -526,6 +549,9 @@ function App() {
         onLaunch={handleBuilderLaunch}
         onStop={stopRun}
         onToggleRecording={() => isRecording ? stopRecording() : startRecording()}
+        onRequestPlacement={handleRequestPlacement}
+        placementResult={scenePlacement}
+        onPlacementConsumed={handlePlacementConsumed}
       />
 
       {/* HMT Toast - Floating notification for pending actions */}
@@ -568,6 +594,7 @@ function App() {
             onRemoveZone={missionPlanner.removeZone}
             showGrid={missionPlanner.showGrid}
             snapToGrid={missionPlanner.snapToGrid}
+            onScenePlacement={handleScenePlacement}
           />
 
           {/* Telemetry HUD overlay on scene */}

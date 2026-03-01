@@ -12,9 +12,9 @@ interface ProtectedAreaEditorProps {
 
 let areaCounter = 0;
 
-function createDefaultArea(): BuilderProtectedArea {
+export function createDefaultArea(): BuilderProtectedArea {
   areaCounter++;
-  const names = ['Ashkelon', 'Sderot', 'Beer Sheva', 'Tel Aviv', 'Haifa', 'Dimona'];
+  const names = ['Alpha City', 'Bravo City', 'Charlie City', 'Delta City', 'Echo City', 'Foxtrot City'];
   return {
     id: `area_${Date.now()}_${areaCounter}`,
     name: names[(areaCounter - 1) % names.length],

@@ -1625,6 +1625,7 @@ interface SimulationSceneProps {
   onRemoveZone?: (id: string) => void;
   showGrid?: boolean;
   snapToGrid?: boolean;
+  onScenePlacement?: (type: 'battery' | 'protected_area', position: { x: number; y: number; z: number }) => void;
 }
 
 export function SimulationScene({
@@ -1651,6 +1652,7 @@ export function SimulationScene({
   onRemoveZone,
   showGrid = false,
   snapToGrid = false,
+  onScenePlacement,
 }: SimulationSceneProps) {
   // Extract current wind from environment state if available
   const currentWind = useMemo(() => {
@@ -1822,6 +1824,7 @@ export function SimulationScene({
           onSelectEntity={onSelectEntity}
           showGrid={showGrid}
           snapToGrid={snapToGrid}
+          onScenePlacement={onScenePlacement}
         />
       )}
     </Canvas>

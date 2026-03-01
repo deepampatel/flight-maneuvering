@@ -21,7 +21,7 @@ import * as THREE from 'three';
 const SCALE = 0.001; // 1 unit = 1km
 const INVERSE_SCALE = 1000; // Convert back to meters
 
-export type PlacementMode = 'view' | 'interceptor' | 'target' | 'launcher' | 'zone';
+export type PlacementMode = 'view' | 'interceptor' | 'target' | 'launcher' | 'zone' | 'battery' | 'protected_area';
 
 export interface PlannedEntity {
   id: string;
@@ -59,6 +59,7 @@ interface MissionPlannerProps {
   onSelectEntity: (id: string | null) => void;
   showGrid: boolean;
   snapToGrid: boolean;
+  onScenePlacement?: (type: 'battery' | 'protected_area', position: { x: number; y: number; z: number }) => void;
 }
 
 // Color palettes
@@ -1119,6 +1120,7 @@ export function MissionPlannerContent({
   onSelectEntity,
   showGrid,
   snapToGrid,
+  onScenePlacement,
 }: MissionPlannerProps) {
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
   const [zoneStart, setZoneStart] = useState<THREE.Vector3 | null>(null);
@@ -1187,6 +1189,17 @@ export function MissionPlannerContent({
     e.stopPropagation();
     const point = e.point.clone();
 
+    // Scene placement modes: battery or protected_area → send coordinates back
+    if (mode === 'battery' || mode === 'protected_area') {
+      const simPos = {
+        x: point.x * INVERSE_SCALE,
+        y: -point.z * INVERSE_SCALE,
+        z: 0,
+      };
+      onScenePlacement?.(mode, simPos);
+      return;
+    }
+
     if (mode === 'zone') {
       setZoneStart(point);
       setZoneCurrent(point);
@@ -1196,7 +1209,7 @@ export function MissionPlannerContent({
       setIsPlacing(true);
       gl.domElement.style.cursor = 'crosshair';
     }
-  }, [mode, gl, onSelectEntity]);
+  }, [mode, gl, onSelectEntity, onScenePlacement]);
 
   // Handle plane drag
   const handlePlaneDrag = useCallback((e: ThreeEvent<PointerEvent>) => {
@@ -1403,6 +1416,8 @@ export function MissionPlannerContent({
             mode === 'interceptor' ? '#3b82f6' :
             mode === 'target' ? '#ef4444' :
             mode === 'launcher' ? '#eab308' :
+            mode === 'battery' ? '#22c55e' :
+            mode === 'protected_area' ? '#06b6d4' :
             '#00ff00'
           }
           anchorX="center"
@@ -1412,6 +1427,8 @@ export function MissionPlannerContent({
           {mode === 'interceptor' ? 'CLICK & DRAG TO PLACE INTERCEPTOR' :
            mode === 'target' ? 'CLICK & DRAG TO PLACE TARGET' :
            mode === 'launcher' ? 'CLICK TO PLACE LAUNCHER' :
+           mode === 'battery' ? 'CLICK TO PLACE DEFENSE BATTERY' :
+           mode === 'protected_area' ? 'CLICK TO PLACE PROTECTED AREA' :
            'CLICK & DRAG TO DRAW ZONE'}
         </Text>
       )}

@@ -5,7 +5,9 @@
  * Protected Areas, Engagement, Environment.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { createDefaultBattery } from './builder/DefenseLayerEditor';
+import { createDefaultArea } from './builder/ProtectedAreaEditor';
 import { ScenarioPresets } from './builder/ScenarioPresets';
 import { DefenseLayerEditor } from './builder/DefenseLayerEditor';
 import { ThreatWaveEditor } from './builder/ThreatWaveEditor';
@@ -29,6 +31,9 @@ interface ScenarioBuilderProps {
   onLaunch: (state: ScenarioBuilderState, presetScenario: string | null) => void;
   onStop: () => void;
   onToggleRecording: () => void;
+  onRequestPlacement?: (type: 'battery' | 'protected_area') => void;
+  placementResult?: { type: 'battery' | 'protected_area'; position: { x: number; y: number; z: number } } | null;
+  onPlacementConsumed?: () => void;
 }
 
 const DEFAULT_STATE: ScenarioBuilderState = {
@@ -60,6 +65,7 @@ type SectionId = 'presets' | 'defense' | 'waves' | 'areas' | 'engagement' | 'env
 export function ScenarioBuilder({
   open, onToggle, isRunning, connected,
   isRecording, onLaunch, onStop, onToggleRecording,
+  onRequestPlacement, placementResult, onPlacementConsumed,
 }: ScenarioBuilderProps) {
   const [state, setState] = useState<ScenarioBuilderState>(DEFAULT_STATE);
   const [activePreset, setActivePreset] = useState<string | null>('first-contact');
@@ -67,6 +73,27 @@ export function ScenarioBuilder({
   const [expandedSections, setExpandedSections] = useState<Set<SectionId>>(
     new Set(['presets', 'defense', 'waves'])
   );
+
+  // Consume placement results from the 3D scene
+  useEffect(() => {
+    if (!placementResult || !onPlacementConsumed) return;
+
+    if (placementResult.type === 'battery') {
+      const battery = createDefaultBattery();
+      battery.position = placementResult.position;
+      battery.name = `Battery ${state.batteries.length + 1}`;
+      setState(s => ({ ...s, batteries: [...s.batteries, battery] }));
+      // Auto-expand defense section
+      setExpandedSections(prev => new Set([...prev, 'defense']));
+    } else if (placementResult.type === 'protected_area') {
+      const area = createDefaultArea();
+      area.center = placementResult.position;
+      setState(s => ({ ...s, protectedAreas: [...s.protectedAreas, area] }));
+      setExpandedSections(prev => new Set([...prev, 'areas']));
+    }
+
+    onPlacementConsumed();
+  }, [placementResult, onPlacementConsumed, state.batteries.length]);
 
   const toggleSection = (id: SectionId) => {
     setExpandedSections((prev) => {
@@ -158,6 +185,14 @@ export function ScenarioBuilder({
                   onChange={(batteries: BuilderBatteryConfig[]) => setState((s) => ({ ...s, batteries }))}
                   disabled={isRunning}
                 />
+                {!isRunning && onRequestPlacement && (
+                  <button
+                    className="builder-place-btn"
+                    onClick={() => onRequestPlacement('battery')}
+                  >
+                    📍 Place Battery on Map
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -198,6 +233,14 @@ export function ScenarioBuilder({
                   onChange={(protectedAreas: BuilderProtectedArea[]) => setState((s) => ({ ...s, protectedAreas }))}
                   disabled={isRunning}
                 />
+                {!isRunning && onRequestPlacement && (
+                  <button
+                    className="builder-place-btn"
+                    onClick={() => onRequestPlacement('protected_area')}
+                  >
+                    📍 Place Area on Map
+                  </button>
+                )}
               </div>
             )}
           </div>
