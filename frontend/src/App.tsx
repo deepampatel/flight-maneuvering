@@ -26,6 +26,7 @@ import { WelcomeModal } from './components/WelcomeModal';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { RadarSweep } from './components/RadarSweep';
 import { EngagementTimeline } from './components/EngagementTimeline';
+import { LayerDiagram } from './components/LayerDiagram';
 import { NARRATIVE_SCENARIOS, calculateScore } from './data/scenarios';
 import type { NarrativeScenario } from './data/scenarios';
 import { useAudio } from './hooks/useAudio';
@@ -498,6 +499,9 @@ function App() {
 
           {/* Radar PPI overlay — top-left picture-in-picture */}
           {isRunning && <RadarSweep state={state} />}
+
+          {/* Layer Diagram — top-right, shown only for multi-layer scenarios */}
+          {isRunning && <LayerDiagram state={state} />}
 
           {/* Camera mode selector */}
           {!isReplayActive && (

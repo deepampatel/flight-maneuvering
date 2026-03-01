@@ -1375,6 +1375,24 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
     return map;
   }, [assignments]);
 
+  // Phase 8: Map interceptor IDs to tier-specific color indices
+  // Battery-launched interceptors have IDs like "BAT_1_I3" — match to battery tier
+  const tierColorMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (state?.batteries) {
+      for (const bat of state.batteries) {
+        for (const logEntry of bat.engagement_log || []) {
+          if (logEntry.interceptor_id) {
+            // Tier-specific color offset: iron_dome=0(blue), davids_sling=2(cyan), arrow=3(purple)
+            const tierOffset = bat.tier === 'davids_sling' ? 2 : bat.tier === 'arrow' ? 3 : 0;
+            map.set(logEntry.interceptor_id, tierOffset);
+          }
+        }
+      }
+    }
+    return map;
+  }, [state?.batteries]);
+
   return (
     <>
       {/* Lighting */}
@@ -1454,17 +1472,21 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         <Launcher key={launcher.id} launcher={launcher} />
       ))}
 
-      {/* All Interceptors */}
-      {interceptors.map((interceptor, idx) => (
-        <Interceptor
-          key={interceptor.id}
-          entity={interceptor}
-          trail={trails.get(interceptor.id) || []}
-          colorIndex={idx}
-          isSelected={selectedEntityId === interceptor.id}
-          onClick={() => onSelectEntity?.(selectedEntityId === interceptor.id ? null : interceptor.id)}
-        />
-      ))}
+      {/* All Interceptors — tier-specific colors for battery-launched interceptors */}
+      {interceptors.map((interceptor, idx) => {
+        const tierIdx = tierColorMap.get(interceptor.id);
+        const colorIdx = tierIdx !== undefined ? tierIdx : idx;
+        return (
+          <Interceptor
+            key={interceptor.id}
+            entity={interceptor}
+            trail={trails.get(interceptor.id) || []}
+            colorIndex={colorIdx}
+            isSelected={selectedEntityId === interceptor.id}
+            onClick={() => onSelectEntity?.(selectedEntityId === interceptor.id ? null : interceptor.id)}
+          />
+        );
+      })}
 
       {/* Persistent trails - render trails for entities not currently in state
           This ensures flight paths remain visible after simulation ends */}

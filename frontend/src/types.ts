@@ -84,6 +84,33 @@ export interface WaveInfo {
   all_spawned: boolean;
 }
 
+// Phase 8: TEWA (Threat Evaluation and Weapon Assignment)
+export interface TEWAAssignment {
+  threat_id: string;
+  threat_class: string;
+  assigned_tier: string;      // 'iron_dome' | 'davids_sling' | 'arrow'
+  assigned_battery_id: string | null;
+  priority: number;
+  engagement_authorized: boolean;
+  fallback_used: boolean;
+  reason: string;
+}
+
+export interface TEWATierStatus {
+  batteries: number;
+  total_ammo: number;
+  max_ammo: number;
+  active_engagements: number;
+}
+
+export interface TEWAState {
+  assignments: TEWAAssignment[];
+  tier_status: Record<string, TEWATierStatus>;
+  total_threats: number;
+  threats_assigned: number;
+  fallback_count: number;
+}
+
 export interface EntityState {
   id: string;
   type: 'target' | 'interceptor';
@@ -346,6 +373,8 @@ export interface SimStateEvent {
   // Phase 6: Saturation & Waves
   engagement_stats?: EngagementStats;
   wave_info?: WaveInfo;
+  // Phase 8: Multi-Layer Defense
+  tewa?: TEWAState;
 }
 
 // Launcher (Bogey) Types

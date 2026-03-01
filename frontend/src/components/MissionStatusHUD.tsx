@@ -298,6 +298,38 @@ export function MissionStatusHUD({
         </div>
       )}
 
+      {/* TEWA Status (Phase 8) */}
+      {state?.tewa && state.tewa.threats_assigned > 0 && (
+        <div className="hud-panel tewa-panel">
+          <div className="hud-title">TEWA</div>
+          <div className="hud-content">
+            <div className="hud-row">
+              <span className="hud-label">ASGN</span>
+              <span className="hud-value">{state.tewa.threats_assigned}/{state.tewa.total_threats}</span>
+            </div>
+            {state.tewa.fallback_count > 0 && (
+              <div className="hud-row">
+                <span className="hud-label">FLBK</span>
+                <span className="hud-value" style={{ color: '#fbbf24' }}>
+                  {state.tewa.fallback_count}
+                </span>
+              </div>
+            )}
+            {Object.entries(state.tewa.tier_status).map(([tier, status]) => {
+              if (status.batteries === 0) return null;
+              const tierLabel = tier === 'iron_dome' ? 'ID' : tier === 'davids_sling' ? 'DS' : 'AR';
+              const tierColor = tier === 'iron_dome' ? '#60a5fa' : tier === 'davids_sling' ? '#22d3ee' : '#a855f7';
+              return (
+                <div key={tier} className="hud-row">
+                  <span className="hud-label" style={{ color: tierColor }}>{tierLabel}</span>
+                  <span className="hud-value">{status.total_ammo}/{status.max_ammo}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Replay controls */}
       {replayState && (
         <div className="hud-panel replay-panel">

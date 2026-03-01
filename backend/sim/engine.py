@@ -40,6 +40,7 @@ from .ipp import ProtectedArea, ImpactPrediction, predict_impact_point, check_th
 from .battery import Battery, BatteryConfig, create_iron_dome_battery
 from .waves import WaveManager, ThreatWave
 from .decoy import deploy_decoys, classify_threat, DecoyConfig
+from .tewa import TEWAController, DefenseTier
 
 # Optional subsystem imports (features disabled by default)
 try:
@@ -181,6 +182,9 @@ class SimState:
     # Battery system (Phase 5)
     batteries: List['Battery'] = field(default_factory=list)
 
+    # TEWA controller (Phase 8)
+    tewa: Optional['TEWAController'] = None
+
     # Wave system (Phase 6)
     wave_manager: Optional['WaveManager'] = None
     decoy_tracking: Dict[str, float] = field(default_factory=dict)  # entity_id -> first_seen_time
@@ -314,6 +318,10 @@ class SimState:
         # Include engagement stats (Phase 6)
         if self.engagement_stats:
             event["engagement_stats"] = self.engagement_stats
+
+        # Include TEWA state (Phase 8)
+        if self.tewa:
+            event["tewa"] = self.tewa.to_event_dict()
 
         # Include wave info
         if self.wave_manager:
@@ -453,6 +461,9 @@ class SimEngine:
         self.wave_configs: List[ThreatWave] = self.config.waves or []
         self.wave_manager: Optional[WaveManager] = None
         self.enable_decoys: bool = self.config.enable_decoys
+
+        # TEWA controller (Phase 8) — initialized after batteries in setup
+        self.tewa: Optional[TEWAController] = None
 
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
@@ -617,6 +628,13 @@ class SimEngine:
         # Add batteries to state
         self.state.batteries = self.batteries
 
+        # Initialize TEWA controller (Phase 8) — registers all batteries
+        if self.batteries:
+            self.tewa = TEWAController()
+            for battery in self.batteries:
+                self.tewa.register_battery(battery)
+            self.state.tewa = self.tewa
+
         # Initialize wave manager (Phase 6)
         if self.wave_configs:
             self.wave_manager = WaveManager(self.wave_configs)
@@ -689,6 +707,13 @@ class SimEngine:
             self.batteries.append(battery)
         # Add batteries to state
         self.state.batteries = self.batteries
+
+        # Initialize TEWA controller (Phase 8)
+        if self.batteries:
+            self.tewa = TEWAController()
+            for battery in self.batteries:
+                self.tewa.register_battery(battery)
+            self.state.tewa = self.tewa
 
         self._finalize_scenario_setup(targets, interceptors)
 
@@ -1103,6 +1128,15 @@ class SimEngine:
                                 )
                                 self.hmt.propose_action(action)
             # Handle timed out actions if needed
+
+        # 7.5. TEWA: Multi-layer threat evaluation and weapon assignment (Phase 8)
+        #      Runs after IPP/decoy classification, before battery engagement.
+        #      Assigns each threat to the appropriate defense tier and battery.
+        if self.tewa and active_targets:
+            self.tewa.evaluate_and_assign(
+                threats=active_targets,
+                impact_predictions=self.state.impact_predictions,
+            )
 
         # 8. BATTERIES: Autonomous battery engagement loop
         if self.batteries:
@@ -1808,6 +1842,211 @@ SCENARIOS = {
                 start_position=Vec3(9000, 500, 100),
                 velocity=Vec3(-440, -10, 300),
                 salvo_interval=0.2,
+            ),
+        ],
+    },
+    # ─── MULTI-LAYER SCENARIOS (Phase 8) ────────────────────────────
+    "davids_sling": {
+        "description": "David's Sling battery vs cruise missiles — medium-range defense",
+        "target_start": Vec3(25000, 0, 5000),
+        "target_velocity": Vec3(-300, 0, -20),      # Subsonic cruise, slight descent
+        "interceptor_start": Vec3(-500, 0, 50),
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 3,
+        "num_interceptors": 0,
+        "target_spacing": 5000.0,
+        "threat_type": "cruise_missile",
+        "interceptor_type": "stunner",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Haifa",
+                center=Vec3(-5000, 0, 0),
+                radius=4000.0,
+                priority=1,
+                population=280000,
+            ),
+        ],
+        "batteries": [
+            BatteryConfig(
+                position=Vec3(0, 0, 0),
+                name="David's Sling Battery",
+                tier="davids_sling",
+                interceptor_type="stunner",
+                radar_range=300000.0,
+                radar_sector=360.0,
+                num_launchers=2,
+                missiles_per_launcher=12,
+                max_simultaneous=4,
+                min_range=40000.0,
+                max_range=300000.0,
+                launch_speed=800.0,
+                launch_elevation=70.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Haifa",
+                        center=Vec3(-5000, 0, 0),
+                        radius=4000.0,
+                        priority=1,
+                        population=280000,
+                    ),
+                ],
+            ),
+        ],
+    },
+    "aegis_total": {
+        "description": "Multi-layer defense — all three tiers vs mixed threat salvo",
+        "target_start": Vec3(15000, 0, 100),
+        "target_velocity": Vec3(-380, 0, 280),
+        "interceptor_start": Vec3(-500, 0, 50),
+        "interceptor_velocity": Vec3(200, 0, 300),
+        "evasion": EvasionType.NONE,
+        "num_targets": 4,                  # Initial Qassam rockets (Iron Dome)
+        "num_interceptors": 0,
+        "target_spacing": 2000.0,
+        "threat_type": "qassam",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Tel Aviv",
+                center=Vec3(-3000, 0, 0),
+                radius=5000.0,
+                priority=1,
+                population=450000,
+            ),
+            ProtectedArea(
+                id="base_bravo",
+                name="Air Force Base",
+                center=Vec3(-3000, 6000, 0),
+                radius=3000.0,
+                priority=2,
+                population=8000,
+            ),
+        ],
+        "batteries": [
+            # Iron Dome Battery — handles short-range rockets
+            BatteryConfig(
+                position=Vec3(0, 0, 0),
+                name="Iron Dome Alpha",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                radar_sector=360.0,
+                num_launchers=3,
+                missiles_per_launcher=20,
+                max_simultaneous=6,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Tel Aviv",
+                        center=Vec3(-3000, 0, 0),
+                        radius=5000.0,
+                        priority=1,
+                        population=450000,
+                    ),
+                ],
+            ),
+            # Iron Dome Battery — defends Air Force Base
+            BatteryConfig(
+                position=Vec3(0, 5000, 0),
+                name="Iron Dome Bravo",
+                tier="iron_dome",
+                interceptor_type="tamir",
+                radar_range=70000.0,
+                radar_sector=360.0,
+                num_launchers=2,
+                missiles_per_launcher=20,
+                max_simultaneous=4,
+                min_range=4000.0,
+                max_range=70000.0,
+                launch_speed=250.0,
+                launch_elevation=80.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="base_bravo",
+                        name="Air Force Base",
+                        center=Vec3(-3000, 6000, 0),
+                        radius=3000.0,
+                        priority=2,
+                        population=8000,
+                    ),
+                ],
+            ),
+            # David's Sling — handles cruise missiles
+            BatteryConfig(
+                position=Vec3(-1000, 2500, 0),
+                name="David's Sling",
+                tier="davids_sling",
+                interceptor_type="stunner",
+                radar_range=300000.0,
+                radar_sector=360.0,
+                num_launchers=2,
+                missiles_per_launcher=12,
+                max_simultaneous=4,
+                min_range=40000.0,
+                max_range=300000.0,
+                launch_speed=800.0,
+                launch_elevation=65.0,
+                protected_areas=[
+                    ProtectedArea(
+                        id="city_alpha",
+                        name="Tel Aviv",
+                        center=Vec3(-3000, 0, 0),
+                        radius=5000.0,
+                        priority=1,
+                        population=450000,
+                    ),
+                    ProtectedArea(
+                        id="base_bravo",
+                        name="Air Force Base",
+                        center=Vec3(-3000, 6000, 0),
+                        radius=3000.0,
+                        priority=2,
+                        population=8000,
+                    ),
+                ],
+            ),
+        ],
+        "waves": [
+            # Wave 1: Cruise missiles (David's Sling targets)
+            ThreatWave(
+                wave_id=1,
+                spawn_time=5.0,
+                threat_type="cruise_missile",
+                count=3,
+                spacing=4000.0,
+                start_position=Vec3(50000, 3000, 8000),
+                velocity=Vec3(-280, -10, -30),
+                salvo_interval=1.5,
+            ),
+            # Wave 2: More Qassam rockets (Iron Dome)
+            ThreatWave(
+                wave_id=2,
+                spawn_time=12.0,
+                threat_type="qassam",
+                count=5,
+                spacing=1500.0,
+                start_position=Vec3(12000, -1000, 100),
+                velocity=Vec3(-400, 20, 270),
+                salvo_interval=0.5,
+            ),
+            # Wave 3: Grad rockets from different direction
+            ThreatWave(
+                wave_id=3,
+                spawn_time=20.0,
+                threat_type="grad",
+                count=4,
+                spacing=2000.0,
+                start_position=Vec3(14000, 5000, 100),
+                velocity=Vec3(-380, -30, 290),
+                salvo_interval=0.6,
             ),
         ],
     },
