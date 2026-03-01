@@ -679,6 +679,14 @@ body {
   color: #22c55e;
 }
 
+/* IPP panel — Impact Point Prediction */
+.ipp-panel {
+  border-color: #f59e0b;
+}
+.ipp-panel .hud-title {
+  color: #f59e0b;
+}
+
 /* Replay panel */
 .replay-progress {
   font-size: 0.7rem;

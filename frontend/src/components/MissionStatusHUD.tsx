@@ -12,6 +12,7 @@ import type {
   ThreatAssessment,
   AssignmentResult,
   ReplayState,
+  ImpactPrediction,
 } from '../types';
 
 interface MissionStatusHUDProps {
@@ -167,6 +168,29 @@ export function MissionStatusHUD({
             <div className="hud-row">
               <span className="hud-label">REC</span>
               <span className="hud-value">{threatAssessment[0].engagement_recommendation.toUpperCase()}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IPP Engagement Status */}
+      {state?.impact_predictions && Object.keys(state.impact_predictions).length > 0 && (
+        <div className="hud-panel ipp-panel">
+          <div className="hud-title">IPP</div>
+          <div className="hud-content">
+            {Object.values(state.impact_predictions).map((pred: ImpactPrediction) => (
+              <div key={pred.threat_id} className="hud-row">
+                <span className="hud-label">{pred.threat_id}</span>
+                <span className={`hud-value ${pred.engage ? 'result-intercept' : 'status-ready'}`}>
+                  {pred.engage ? 'ENGAGE' : pred.threatens_area ? 'TRACK' : 'IGNORE'}
+                </span>
+              </div>
+            ))}
+            <div className="hud-row">
+              <span className="hud-label">TTI</span>
+              <span className="hud-value">
+                {Math.min(...Object.values(state.impact_predictions).map((p: ImpactPrediction) => p.time_to_impact)).toFixed(1)}s
+              </span>
             </div>
           </div>
         </div>

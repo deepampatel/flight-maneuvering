@@ -180,6 +180,32 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
       accuracyWeight: 0.5,
     },
   },
+  {
+    id: 'iron-shield',
+    name: 'Iron Shield',
+    codename: 'IRON SHIELD',
+    difficulty: 'MEDIUM',
+    briefing: {
+      situation: 'Three unguided rockets have been launched from the east. Impact Point Prediction indicates two are heading for the defended city. One will land in an open field.',
+      objective: 'Engage only the threats targeting the protected area. Conserve interceptors — do not waste ammo on rockets landing in empty fields.',
+      constraints: ['IPP active — only engage threats to defended zones', '3 rockets inbound, 2 threatening city', 'Unguided ballistic threats'],
+      threatPicture: 'Three Qassam-type unguided rockets on ballistic trajectories. Two predicted to impact within city radius. One heading for open terrain.',
+    },
+    config: {
+      scenario: 'iron_shield',
+      guidance: 'proportional_nav',
+      evasion: 'none',
+      navConstant: 4,
+      numInterceptors: 3,
+      numTargets: 3,
+    },
+    scoring: {
+      parTime: 30,
+      timeBonus: 8,
+      efficiencyWeight: 0.5,
+      accuracyWeight: 0.5,
+    },
+  },
 ];
 
 export function calculateScore(

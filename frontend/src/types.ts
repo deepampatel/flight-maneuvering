@@ -13,6 +13,26 @@ export interface Vec3 {
 
 export type FlightPhase = 'boost' | 'ballistic' | 'terminal';
 
+export interface ProtectedArea {
+  id: string;
+  name: string;
+  center: Vec3;
+  radius: number;      // meters
+  priority: number;     // 1 = highest
+  population: number;
+}
+
+export interface ImpactPrediction {
+  threat_id: string;
+  impact_point: Vec3;
+  time_to_impact: number;
+  threatens_area: string | null;   // area ID
+  area_name: string | null;
+  distance_to_area: number;
+  confidence: number;              // 0-1
+  engage: boolean;
+}
+
 export interface EntityState {
   id: string;
   type: 'target' | 'interceptor';
@@ -32,6 +52,7 @@ export interface EntityState {
   fuel_total?: number;
   burn_time?: number;
   burn_elapsed?: number;
+  engagement_decision?: string;  // 'engage' | 'track_only' | 'ignore' | ''
 }
 
 export interface SimCompleteEvent {
@@ -266,6 +287,9 @@ export interface SimStateEvent {
   };
   // Launchers
   launchers?: LauncherState[];
+  // Phase 4: Protected Areas & IPP
+  protected_areas?: ProtectedArea[];
+  impact_predictions?: Record<string, ImpactPrediction>;
 }
 
 // Launcher (Bogey) Types

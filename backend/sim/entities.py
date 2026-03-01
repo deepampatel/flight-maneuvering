@@ -73,6 +73,7 @@ class Entity:
     guided: bool = True
     threat_type: str = ""
     enable_gravity: bool = False
+    engagement_decision: str = ""  # 'engage', 'track_only', 'ignore', '' (not evaluated)
 
     def speed(self) -> float:
         """Current speed (magnitude of velocity)."""
@@ -153,6 +154,7 @@ class Entity:
             "flight_phase": self.flight_phase.value,
             "guided": self.guided,
             "threat_type": self.threat_type,
+            "engagement_decision": self.engagement_decision,
         }
         if self.propulsion:
             fuel_remaining = max(

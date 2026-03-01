@@ -20,7 +20,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Grid, Line, Text, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState } from '../types';
+import type { EntityState, SimStateEvent, InterceptGeometry, Vec3, AssignmentResult, SimStateEventWithEnvironment, SensorTrack, EngagementZone, CooperativeState, LauncherState, ProtectedArea, ImpactPrediction } from '../types';
 import { MissionPlannerContent } from './MissionPlanner';
 import type { PlacementMode, PlannedEntity, PlannedZone } from './MissionPlanner';
 import { CameraController } from './CameraController';
@@ -91,9 +91,14 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelect
   const groupRef = useRef<THREE.Group>(null);
   const selectionRef = useRef<THREE.Mesh>(null);
 
-  // Get color for this target
-  const color = TARGET_COLORS[colorIndex % TARGET_COLORS.length];
-  const emissive = TARGET_EMISSIVE[colorIndex % TARGET_EMISSIVE.length];
+  // Get color for this target — IPP engagement decision overrides default colors
+  const engagementDecision = entity.engagement_decision;
+  const color = engagementDecision === 'ignore' ? '#6b7280'      // Grey for ignored
+    : engagementDecision === 'track_only' ? '#f59e0b'            // Yellow for tracking
+    : TARGET_COLORS[colorIndex % TARGET_COLORS.length];           // Default red for engage/unknown
+  const emissive = engagementDecision === 'ignore' ? '#374151'
+    : engagementDecision === 'track_only' ? '#92400e'
+    : TARGET_EMISSIVE[colorIndex % TARGET_EMISSIVE.length];
 
   // Convert sim coordinates to Three.js coordinates
   const position: [number, number, number] = [
@@ -148,6 +153,18 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelect
       >
         {entity.id}
       </Text>
+
+      {/* Engagement decision label (IPP) */}
+      {engagementDecision && !isIntercepted && (
+        <Text
+          position={[position[0], position[1] + 0.2, position[2]]}
+          fontSize={0.07}
+          color={engagementDecision === 'engage' ? '#ef4444' : engagementDecision === 'ignore' ? '#6b7280' : '#f59e0b'}
+          anchorX="center"
+        >
+          {engagementDecision === 'engage' ? 'ENGAGE' : engagementDecision === 'ignore' ? 'NO THREAT' : 'TRACKING'}
+        </Text>
+      )}
 
       {/* Trail - always visible, brighter when intercepted for visibility */}
       {trail.length > 1 && (
@@ -1013,6 +1030,166 @@ function PersistentTrail({
   );
 }
 
+/**
+ * Protected Area Dome — translucent green hemisphere over defended zones
+ */
+function ProtectedAreaDome({ area }: { area: ProtectedArea }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+  const position: [number, number, number] = [
+    area.center.x * SCALE,
+    0.01,
+    -area.center.y * SCALE,
+  ];
+  const radius = area.radius * SCALE;
+
+  // Animate dome pulse
+  useFrame((state) => {
+    if (meshRef.current) {
+      const material = meshRef.current.material as THREE.MeshStandardMaterial;
+      material.opacity = 0.08 + Math.sin(state.clock.elapsedTime * 0.8) * 0.03;
+    }
+    if (ringRef.current) {
+      ringRef.current.rotation.z = state.clock.elapsedTime * 0.15;
+    }
+  });
+
+  return (
+    <group position={position}>
+      {/* Translucent dome */}
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial
+          color="#22c55e"
+          transparent
+          opacity={0.1}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Ground circle */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <ringGeometry args={[radius * 0.98, radius, 64]} />
+        <meshBasicMaterial color="#22c55e" transparent opacity={0.25} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Inner range rings */}
+      <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]}>
+        <ringGeometry args={[radius * 0.48, radius * 0.5, 64]} />
+        <meshBasicMaterial color="#22c55e" transparent opacity={0.15} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* City name label */}
+      <Text
+        position={[0, 0.3, 0]}
+        fontSize={0.18}
+        color="#22c55e"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {area.name}
+      </Text>
+
+      {/* DEFENDED label */}
+      <Text
+        position={[0, 0.15, 0]}
+        fontSize={0.1}
+        color="#4ade80"
+        anchorX="center"
+        anchorY="middle"
+      >
+        DEFENDED
+      </Text>
+
+      {/* Radius label at edge */}
+      <Text
+        position={[radius, 0.1, 0]}
+        fontSize={0.08}
+        color="#22c55e"
+        anchorX="center"
+      >
+        {`${(area.radius / 1000).toFixed(1)}km`}
+      </Text>
+    </group>
+  );
+}
+
+/**
+ * Impact Point Marker — pulsing marker on the ground where a threat is predicted to land
+ * Red = threatening protected area, Yellow = open field
+ */
+function ImpactPointMarker({ prediction }: { prediction: ImpactPrediction }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+  const position: [number, number, number] = [
+    prediction.impact_point.x * SCALE,
+    0.02,
+    -prediction.impact_point.y * SCALE,
+  ];
+  const isThreat = prediction.engage;
+  const color = isThreat ? '#ef4444' : '#f59e0b';
+
+  // Pulsing animation
+  useFrame((state) => {
+    if (meshRef.current) {
+      const scale = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.3;
+      meshRef.current.scale.set(scale, scale, scale);
+    }
+    if (ringRef.current) {
+      const material = ringRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = 0.2 + Math.sin(state.clock.elapsedTime * 2) * 0.15;
+      ringRef.current.rotation.z = state.clock.elapsedTime * 0.5;
+    }
+  });
+
+  return (
+    <group position={position}>
+      {/* Impact dot */}
+      <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.08, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.8} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Expanding ring */}
+      <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+        <ringGeometry args={[0.15, 0.2, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={0.3} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Threat ID label */}
+      <Text
+        position={[0, 0.15, 0]}
+        fontSize={0.08}
+        color={color}
+        anchorX="center"
+      >
+        {prediction.threat_id}
+      </Text>
+
+      {/* Status label */}
+      <Text
+        position={[0, 0.08, 0]}
+        fontSize={0.06}
+        color={color}
+        anchorX="center"
+      >
+        {isThreat ? `ENGAGE — ${prediction.area_name || 'AREA'}` : 'NO THREAT'}
+      </Text>
+
+      {/* TTI label */}
+      <Text
+        position={[0, 0.02, 0.12]}
+        fontSize={0.05}
+        color={color}
+        anchorX="center"
+      >
+        {`TTI ${prediction.time_to_impact.toFixed(1)}s`}
+      </Text>
+    </group>
+  );
+}
+
 interface ExplosionData {
   id: string;
   position: [number, number, number];
@@ -1109,6 +1286,16 @@ function SceneContent({ state, trails, interceptGeometry, assignments, currentWi
         cooperativeState={cooperativeState || null}
         entities={state?.entities || []}
       />
+
+      {/* Protected Area Domes - Phase 4 IPP */}
+      {state?.protected_areas && state.protected_areas.map((area) => (
+        <ProtectedAreaDome key={area.id} area={area} />
+      ))}
+
+      {/* Impact Point Markers - Phase 4 IPP */}
+      {state?.impact_predictions && Object.values(state.impact_predictions).map((pred) => (
+        <ImpactPointMarker key={pred.threat_id} prediction={pred as ImpactPrediction} />
+      ))}
 
       {/* All Targets */}
       {targets.map((target, idx) => (

@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from sim.engine import SimEngine, SimConfig, load_scenario, SCENARIOS
 from sim.vector import Vec3
+from sim.ipp import ProtectedArea
 from sim.guidance import GuidanceType, GuidanceParams, create_guidance_function
 from sim.monte_carlo import MonteCarloConfig, run_monte_carlo, parameter_sweep
 from sim.evasion import EvasionType, EvasionConfig
@@ -530,6 +531,9 @@ async def start_run(config: RunConfig):
         # Scenario num_interceptors takes precedence (for swarm scenarios)
         num_interceptors = scenario.get("num_interceptors") or config.num_interceptors
         interceptor_spacing = scenario.get("interceptor_spacing", 100.0)
+        protected_areas = scenario.get("protected_areas", None)
+        threat_type = scenario.get("threat_type", None)
+        interceptor_type = scenario.get("interceptor_type", None)
 
         current_engine.setup_scenario(
             target_start=scenario["target_start"],
@@ -540,6 +544,9 @@ async def start_run(config: RunConfig):
             num_targets=num_targets,
             target_spacing=target_spacing,
             interceptor_spacing=interceptor_spacing,
+            protected_areas=protected_areas,
+            threat_type=threat_type,
+            interceptor_type=interceptor_type,
         )
 
     # Create custom zones if provided

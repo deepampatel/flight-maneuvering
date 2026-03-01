@@ -26,7 +26,7 @@ from typing import Callable, Awaitable, Optional, List, Dict
 import uuid
 
 from .vector import Vec3
-from .entities import Entity, EntityType, create_target, create_interceptor
+from .entities import Entity, EntityType, create_target, create_interceptor, create_threat_from_catalog, create_interceptor_from_catalog
 from .evasion import (
     EvasionType, EvasionConfig, EvasionState,
     EvasionFunction, create_evasion_function, no_evasion
@@ -36,6 +36,7 @@ from .assignment import (
 )
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
+from .ipp import ProtectedArea, ImpactPrediction, predict_impact_point, check_threat_to_areas
 
 # Optional subsystem imports (features disabled by default)
 try:
@@ -123,6 +124,9 @@ class SimConfig:
     enable_hmt: bool = False
     hmt_config: Optional['HMTConfig'] = None
 
+    # Protected areas for IPP
+    protected_areas: Optional[List['ProtectedArea']] = None
+
 
 @dataclass
 class SimState:
@@ -159,6 +163,10 @@ class SimState:
 
     # Launch platforms (bogeys)
     launchers: List['LaunchPlatform'] = field(default_factory=list)
+
+    # Protected areas and impact predictions (Phase 4)
+    protected_areas: List['ProtectedArea'] = field(default_factory=list)
+    impact_predictions: Dict[str, 'ImpactPrediction'] = field(default_factory=dict)
 
     # Legacy property for backward compatibility - single target
     @property
@@ -240,6 +248,36 @@ class SimState:
         # Include launcher state
         if self.launchers:
             event["launchers"] = [l.to_state_dict() for l in self.launchers]
+
+        # Include protected areas
+        if self.protected_areas:
+            event["protected_areas"] = [
+                {
+                    "id": area.id,
+                    "name": area.name,
+                    "center": area.center.to_dict(),
+                    "radius": area.radius,
+                    "priority": area.priority,
+                    "population": area.population,
+                }
+                for area in self.protected_areas
+            ]
+
+        # Include impact predictions
+        if self.impact_predictions:
+            event["impact_predictions"] = {
+                tid: {
+                    "threat_id": pred.threat_id,
+                    "impact_point": pred.impact_point.to_dict(),
+                    "time_to_impact": pred.time_to_impact,
+                    "threatens_area": pred.threatens_area,
+                    "area_name": pred.area_name,
+                    "distance_to_area": pred.distance_to_area,
+                    "confidence": pred.confidence,
+                    "engage": pred.engage,
+                }
+                for tid, pred in self.impact_predictions.items()
+            }
 
         return event
 
@@ -359,6 +397,9 @@ class SimEngine:
             hmt_cfg = self.config.hmt_config or HMTConfig()
             self.hmt = HumanMachineTeaming(hmt_cfg)
 
+        # Protected areas for IPP (Phase 4)
+        self.protected_areas: List[ProtectedArea] = self.config.protected_areas or []
+
     def on_event(self, handler: Callable[[dict], Awaitable[None]]) -> None:
         """Register an event handler (for WebSocket broadcast, logging, etc)."""
         self._event_handlers.append(handler)
@@ -384,6 +425,9 @@ class SimEngine:
         additional_targets: Optional[List[Dict]] = None,  # [{start: Vec3, velocity: Vec3}, ...]
         num_targets: int = 1,  # Alternative: auto-generate multiple targets
         target_spacing: float = 300.0,  # meters between auto-generated targets
+        protected_areas: Optional[List['ProtectedArea']] = None,
+        threat_type: Optional[str] = None,  # e.g. 'qassam', 'grad' — uses catalog
+        interceptor_type: Optional[str] = None,  # e.g. 'tamir' — uses catalog
     ) -> None:
         """
         Initialize a new scenario.
@@ -398,7 +442,12 @@ class SimEngine:
             additional_targets: List of additional target configs [{start: Vec3, velocity: Vec3}, ...]
             num_targets: Auto-generate this many targets (spread laterally)
             target_spacing: Lateral spacing for auto-generated targets
+            protected_areas: Optional list of ProtectedArea for IPP (scenario-specific)
         """
+        # Merge protected areas from parameter (scenario-specific) with engine defaults
+        if protected_areas is not None:
+            self.protected_areas = protected_areas
+
         # Create interceptors with lateral offset
         interceptors = []
         for i in range(num_interceptors):
@@ -421,9 +470,20 @@ class SimEngine:
             else:
                 start_pos = interceptor_start
 
-            interceptors.append(
-                create_interceptor(start_pos, interceptor_velocity, f"I{i+1}")
-            )
+            if interceptor_type:
+                interceptors.append(
+                    create_interceptor_from_catalog(interceptor_type, start_pos, interceptor_velocity, f"I{i+1}")
+                )
+            else:
+                interceptors.append(
+                    create_interceptor(start_pos, interceptor_velocity, f"I{i+1}")
+                )
+
+        # Helper: create target using catalog or default
+        def _make_target(pos: Vec3, vel: Vec3, tid: str) -> Entity:
+            if threat_type:
+                return create_threat_from_catalog(threat_type, pos, vel, tid)
+            return create_target(pos, vel, tid)
 
         # Create targets (support multiple)
         targets = []
@@ -431,14 +491,14 @@ class SimEngine:
         # Primary target always created
         if num_targets == 1 and not additional_targets:
             # Single target - backward compatible
-            targets.append(create_target(target_start, target_velocity, "T1"))
+            targets.append(_make_target(target_start, target_velocity, "T1"))
         else:
             # Multiple targets - either from num_targets or additional_targets
             if additional_targets:
                 # Use explicit target definitions
-                targets.append(create_target(target_start, target_velocity, "T1"))
+                targets.append(_make_target(target_start, target_velocity, "T1"))
                 for i, target_cfg in enumerate(additional_targets):
-                    targets.append(create_target(
+                    targets.append(_make_target(
                         target_cfg["start"],
                         target_cfg["velocity"],
                         f"T{i+2}"
@@ -463,7 +523,7 @@ class SimEngine:
                     else:
                         start_pos = target_start
 
-                    targets.append(create_target(start_pos, target_velocity, f"T{i+1}"))
+                    targets.append(_make_target(start_pos, target_velocity, f"T{i+1}"))
 
         # Reset evasion state for new scenario
         self._evasion_state = EvasionState()
@@ -491,6 +551,9 @@ class SimEngine:
             datalink=self.datalink,
             hmt=self.hmt,
         )
+
+        # Add protected areas to state
+        self.state.protected_areas = self.protected_areas
 
         self._finalize_scenario_setup(targets, interceptors)
 
@@ -548,6 +611,9 @@ class SimEngine:
             datalink=self.datalink,
             hmt=self.hmt,
         )
+
+        # Add protected areas to state
+        self.state.protected_areas = self.protected_areas
 
         self._finalize_scenario_setup(targets, interceptors)
 
@@ -700,6 +766,32 @@ class SimEngine:
                 self._evasion_config,
             )
             target.set_acceleration(evasion_accel)
+
+        # 1.5 IPP: Impact Point Prediction for all threats when areas are defended
+        #     Predicts where each threat will land and whether it threatens a protected area.
+        #     This is the KEY innovation of Iron Dome: only intercept what matters.
+        if self.protected_areas and active_targets:
+            for target in active_targets:
+                prediction = check_threat_to_areas(
+                    threat_id=target.id,
+                    position=target.position,
+                    velocity=target.velocity,
+                    dry_mass=target.dry_mass,
+                    cross_section=target.cross_section,
+                    drag_coefficient=target.drag_coefficient,
+                    propulsion=target.propulsion,
+                    burn_elapsed=target.burn_elapsed,
+                    guided=target.guided,
+                    protected_areas=self.protected_areas,
+                )
+                self.state.impact_predictions[target.id] = prediction
+                # Set engagement decision on the entity
+                if prediction.engage:
+                    target.engagement_decision = "engage"
+                elif prediction.threatens_area:
+                    target.engagement_decision = "track_only"
+                else:
+                    target.engagement_decision = "ignore"
 
         # 2. GUIDANCE: Calculate acceleration for each interceptor
         # Track which interceptors are still active
@@ -1222,6 +1314,59 @@ SCENARIOS = {
         "enable_swarm": True,
         "swarm_formation": "diamond",
         "swarm_spacing": 200.0,
+    },
+    # ─── IRON DOME SCENARIOS ────────────────────────────────────────
+    "iron_shield": {
+        "description": "Qassam rockets vs Iron Dome — 3 rockets, only 2 threaten the city",
+        "target_start": Vec3(8000, 0, 100),        # 8km east, near ground
+        "target_velocity": Vec3(-450, 0, 300),      # West at 450m/s, up at 300m/s (ballistic arc)
+        "interceptor_start": Vec3(-1000, 1000, 50), # Near city, offset for intercept geometry
+        "interceptor_velocity": Vec3(200, 0, 300),  # Upward launch toward threat
+        "evasion": EvasionType.NONE,
+        "num_targets": 3,
+        "target_spacing": 3500.0,
+        "threat_type": "qassam",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Tel Aviv",
+                center=Vec3(-2000, 1000, 0),  # Offset in Y so 2 rockets hit, 1 misses
+                radius=3000.0,
+                priority=1,
+                population=400000,
+            ),
+        ],
+    },
+    "iron_dome_salvo": {
+        "description": "5-rocket salvo against defended city",
+        "target_start": Vec3(10000, 0, 100),
+        "target_velocity": Vec3(-180, 20, 280),
+        "interceptor_start": Vec3(0, 0, 50),
+        "interceptor_velocity": Vec3(120, 0, 250),
+        "evasion": EvasionType.NONE,
+        "num_targets": 5,
+        "target_spacing": 1200.0,
+        "threat_type": "grad",
+        "interceptor_type": "tamir",
+        "protected_areas": [
+            ProtectedArea(
+                id="city_alpha",
+                name="Ashkelon",
+                center=Vec3(-1000, 0, 0),
+                radius=2500.0,
+                priority=1,
+                population=150000,
+            ),
+            ProtectedArea(
+                id="base_bravo",
+                name="IDF Base",
+                center=Vec3(-1000, 3000, 0),
+                radius=1500.0,
+                priority=2,
+                population=5000,
+            ),
+        ],
     },
 }
 
