@@ -19,6 +19,13 @@ from typing import Callable
 import numpy as np
 
 from .vector import Vec3
+from .ballistics import (
+    FlightPhase,
+    PropulsionConfig,
+    apply_ballistic_physics,
+    determine_flight_phase,
+    compute_current_mass,
+)
 
 
 class EntityType(str, Enum):
@@ -38,24 +45,34 @@ class Entity:
 
     Parameters:
     - max_accel: maximum acceleration magnitude (m/s²)
-                 This represents physical limits (thrust, structural G-limits)
-
     Physical properties (for environmental effects):
-    - mass: entity mass in kg (for drag calculations)
-    - cross_section: frontal area in m² (for drag calculations)
-    - drag_coefficient: aerodynamic Cd (optional override)
+    - mass, cross_section, drag_coefficient
+
+    Ballistic properties (for realistic flight phases):
+    - flight_phase: BOOST / BALLISTIC / TERMINAL
+    - propulsion: rocket motor config
+    - burn_elapsed, dry_mass, guided, threat_type, enable_gravity
     """
     id: str
     entity_type: EntityType
     position: Vec3
     velocity: Vec3
     acceleration: Vec3 = field(default_factory=Vec3.zero)
-    max_accel: float = 50.0  # ~5G, reasonable for a missile
+    max_accel: float = 50.0
 
-    # Physical properties for environmental effects
-    mass: float = 150.0          # kg (typical small missile)
-    cross_section: float = 0.05  # m² (typical missile cross-section)
-    drag_coefficient: float = 0.3  # Streamlined body Cd
+    # Physical properties
+    mass: float = 150.0
+    cross_section: float = 0.05
+    drag_coefficient: float = 0.3
+
+    # Ballistic properties
+    flight_phase: FlightPhase = FlightPhase.BALLISTIC
+    propulsion: PropulsionConfig | None = None
+    burn_elapsed: float = 0.0
+    dry_mass: float = 150.0
+    guided: bool = True
+    threat_type: str = ""
+    enable_gravity: bool = False
 
     def speed(self) -> float:
         """Current speed (magnitude of velocity)."""
@@ -65,14 +82,39 @@ class Entity:
         """
         Integrate motion equations for one timestep.
 
-        This uses semi-implicit Euler integration:
-        1. Update velocity with current acceleration
-        2. Update position with NEW velocity
-
-        Why semi-implicit? It's more stable than explicit Euler
-        and good enough for our purposes. Real systems use RK4
-        or more sophisticated integrators.
+        Uses semi-implicit Euler:
+        1. Apply ballistic physics (gravity, thrust, drag)
+        2. Add guidance/evasion acceleration
+        3. Clamp total to max_accel
+        4. Integrate velocity and position
         """
+        # Apply ballistic physics if enabled
+        if self.enable_gravity or self.propulsion:
+            ballistic_accel, self.burn_elapsed = apply_ballistic_physics(
+                velocity=self.velocity,
+                position=self.position,
+                dry_mass=self.dry_mass,
+                cross_section=self.cross_section,
+                drag_coefficient=self.drag_coefficient,
+                propulsion=self.propulsion,
+                burn_elapsed=self.burn_elapsed,
+                dt=dt,
+                enable_gravity=self.enable_gravity,
+                enable_drag=True,
+            )
+            # Add ballistic forces to commanded acceleration
+            self.acceleration = self.acceleration + ballistic_accel
+
+            # Update flight phase
+            self.flight_phase = determine_flight_phase(
+                self.propulsion, self.burn_elapsed
+            )
+
+            # Update mass
+            self.mass = compute_current_mass(
+                self.dry_mass, self.propulsion, self.burn_elapsed
+            )
+
         # Clamp acceleration to physical limits
         accel_mag = self.acceleration.magnitude()
         if accel_mag > self.max_accel:
@@ -81,6 +123,11 @@ class Entity:
         # Semi-implicit Euler integration
         self.velocity = self.velocity + self.acceleration * dt
         self.position = self.position + self.velocity * dt
+
+        # Ground collision: clamp at z=0
+        if self.position.z < 0:
+            self.position = Vec3(self.position.x, self.position.y, 0.0)
+            self.velocity = Vec3(self.velocity.x, self.velocity.y, 0.0)
 
     def set_acceleration(self, accel: Vec3) -> None:
         """
@@ -92,7 +139,7 @@ class Entity:
 
     def to_state_dict(self) -> dict:
         """Serialize current state for transmission."""
-        return {
+        d = {
             "id": self.id,
             "type": self.entity_type.value,
             "position": self.position.to_dict(),
@@ -102,7 +149,21 @@ class Entity:
             "mass": self.mass,
             "cross_section": self.cross_section,
             "drag_coefficient": self.drag_coefficient,
+            # Ballistic fields
+            "flight_phase": self.flight_phase.value,
+            "guided": self.guided,
+            "threat_type": self.threat_type,
         }
+        if self.propulsion:
+            fuel_remaining = max(
+                0.0,
+                self.propulsion.fuel_mass * (1.0 - self.burn_elapsed / self.propulsion.burn_time)
+            ) if self.propulsion.burn_time > 0 else 0.0
+            d["fuel_remaining"] = fuel_remaining
+            d["fuel_total"] = self.propulsion.fuel_mass
+            d["burn_time"] = self.propulsion.burn_time
+            d["burn_elapsed"] = self.burn_elapsed
+        return d
 
 
 def create_target(
@@ -156,4 +217,64 @@ def create_interceptor(
         mass=mass,
         cross_section=cross_section,
         drag_coefficient=drag_coefficient,
+    )
+
+
+def create_threat_from_catalog(
+    threat_type: str,
+    start_pos: Vec3,
+    velocity: Vec3,
+    target_id: str = "T1",
+    enable_gravity: bool = True,
+) -> Entity:
+    """Create a target from the threat catalog (qassam, grad, etc.)."""
+    from .threat_types import THREAT_CATALOG
+    profile = THREAT_CATALOG[threat_type]
+    return Entity(
+        id=target_id,
+        entity_type=EntityType.TARGET,
+        position=start_pos,
+        velocity=velocity,
+        acceleration=Vec3.zero(),
+        max_accel=profile.max_accel if profile.guided else 0.0,
+        mass=profile.total_mass,
+        cross_section=profile.cross_section,
+        drag_coefficient=profile.drag_coefficient,
+        flight_phase=FlightPhase.BOOST,
+        propulsion=profile.propulsion,
+        burn_elapsed=0.0,
+        dry_mass=profile.dry_mass,
+        guided=profile.guided,
+        threat_type=threat_type,
+        enable_gravity=enable_gravity,
+    )
+
+
+def create_interceptor_from_catalog(
+    interceptor_type: str,
+    start_pos: Vec3,
+    velocity: Vec3,
+    interceptor_id: str = "I1",
+    enable_gravity: bool = True,
+) -> Entity:
+    """Create an interceptor from the catalog (tamir, stunner, etc.)."""
+    from .threat_types import INTERCEPTOR_CATALOG
+    profile = INTERCEPTOR_CATALOG[interceptor_type]
+    return Entity(
+        id=interceptor_id,
+        entity_type=EntityType.INTERCEPTOR,
+        position=start_pos,
+        velocity=velocity,
+        acceleration=Vec3.zero(),
+        max_accel=profile.max_accel,
+        mass=profile.total_mass,
+        cross_section=profile.cross_section,
+        drag_coefficient=profile.drag_coefficient,
+        flight_phase=FlightPhase.BOOST,
+        propulsion=profile.propulsion,
+        burn_elapsed=0.0,
+        dry_mass=profile.dry_mass,
+        guided=True,
+        threat_type=interceptor_type,
+        enable_gravity=enable_gravity,
     )

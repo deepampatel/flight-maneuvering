@@ -11,6 +11,8 @@ export interface Vec3 {
   z: number;
 }
 
+export type FlightPhase = 'boost' | 'ballistic' | 'terminal';
+
 export interface EntityState {
   id: string;
   type: 'target' | 'interceptor';
@@ -22,6 +24,14 @@ export interface EntityState {
   mass?: number;
   cross_section?: number;
   drag_coefficient?: number;
+  // Ballistic properties
+  flight_phase?: FlightPhase;
+  guided?: boolean;
+  threat_type?: string;
+  fuel_remaining?: number;
+  fuel_total?: number;
+  burn_time?: number;
+  burn_elapsed?: number;
 }
 
 export interface SimCompleteEvent {
