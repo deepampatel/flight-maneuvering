@@ -70,6 +70,36 @@ const _coneOrigin = new THREE.Vector3();
 const _coneCorrection = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 
 // ---------------------------------------------------------------------------
+// Shared hooks — reduce per-component useFrame overhead
+// ---------------------------------------------------------------------------
+
+/** Orient a group along its velocity vector + optionally spin a selection ring. */
+function useVelocityOrientation(
+  groupRef: React.RefObject<THREE.Group | null>,
+  selectionRef: React.RefObject<THREE.Mesh | null>,
+  entityPos: Vec3,
+  entityVel: Vec3,
+  isSelected: boolean,
+) {
+  const { viewMode: vm, globeConfig: gc } = useSceneConfig();
+  useFrame((state) => {
+    if (groupRef.current) {
+      const vel = velocityToScene(entityPos, entityVel, vm, gc);
+      if (vel.lengthSq() > 0.001) {
+        _coneDir.copy(vel).normalize();
+        _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
+        _coneQuat.setFromRotationMatrix(_coneMatrix);
+        _coneQuat.multiply(_coneCorrection);
+        groupRef.current.quaternion.copy(_coneQuat);
+      }
+    }
+    if (selectionRef.current && isSelected) {
+      selectionRef.current.rotation.z = state.clock.elapsedTime * 1.5;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Target
 // ---------------------------------------------------------------------------
 function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelected = false, onClick }: TargetProps) {
@@ -87,22 +117,7 @@ function Target({ entity, trail, colorIndex = 0, isIntercepted = false, isSelect
 
   const position = metersToScene(entity.position, vm, gc);
 
-  // Orient along velocity direction
-  useFrame((state) => {
-    if (groupRef.current) {
-      const vel = velocityToScene(entity.position, entity.velocity, vm, gc);
-      if (vel.lengthSq() > 0.001) {
-        _coneDir.copy(vel).normalize();
-        _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
-        _coneQuat.setFromRotationMatrix(_coneMatrix);
-        _coneQuat.multiply(_coneCorrection);
-        groupRef.current.quaternion.copy(_coneQuat);
-      }
-    }
-    if (selectionRef.current && isSelected) {
-      selectionRef.current.rotation.z = state.clock.elapsedTime * 1.5;
-    }
-  });
+  useVelocityOrientation(groupRef, selectionRef, entity.position, entity.velocity, isSelected);
 
   return (
     <group>
@@ -251,21 +266,7 @@ function Interceptor({ entity, trail, colorIndex = 0, isSelected = false, onClic
     [entity.position, entity.velocity, vm, gc]);
   const velocity: [number, number, number] = [sceneVel.x * 0.001, sceneVel.y * 0.001, sceneVel.z * 0.001];
 
-  useFrame((state) => {
-    if (groupRef.current) {
-      const vel = velocityToScene(entity.position, entity.velocity, vm, gc);
-      if (vel.lengthSq() > 0.001) {
-        _coneDir.copy(vel).normalize();
-        _coneMatrix.lookAt(_coneOrigin, _coneDir, _coneUp);
-        _coneQuat.setFromRotationMatrix(_coneMatrix);
-        _coneQuat.multiply(_coneCorrection);
-        groupRef.current.quaternion.copy(_coneQuat);
-      }
-    }
-    if (selectionRef.current && isSelected) {
-      selectionRef.current.rotation.z = state.clock.elapsedTime * 1.5;
-    }
-  });
+  useVelocityOrientation(groupRef, selectionRef, entity.position, entity.velocity, isSelected);
 
   return (
     <group>

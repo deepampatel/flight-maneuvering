@@ -1421,6 +1421,16 @@ class SimEngine:
             self.state.status = SimStatus.COMPLETED
             self.state.result = EngagementResult.TIMEOUT
 
+        # Log run summary
+        kills = len(self.state.intercepted_pairs)
+        total_targets = len(self.state.targets)
+        total_interceptors = self.state.engagement_stats.get("total_interceptors_launched", 0)
+        if self.batteries:
+            total_interceptors = sum(b._interceptor_counter for b in self.batteries)
+        print(f"[SIM] {self.state.run_id} done: {self.state.result.value} "
+              f"t={self.state.sim_time:.1f}s kills={kills}/{total_targets} "
+              f"interceptors_launched={total_interceptors}")
+
         # Emit final event
         final_miss = self.state.miss_distance if self.state.miss_distance != float('inf') else -1
         await self._emit_event({

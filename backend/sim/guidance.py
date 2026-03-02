@@ -102,7 +102,7 @@ class GuidanceParams:
     """Parameters that tune guidance behavior."""
     # Navigation constant (N) - typically 3-5
     # Higher N = more aggressive maneuvering
-    nav_constant: float = 4.0
+    nav_constant: float = 4.5
 
     # Minimum range to apply guidance (avoid singularities)
     min_range: float = 1.0
@@ -305,10 +305,10 @@ def proportional_navigation(state: GuidanceState, params: GuidanceParams) -> Vec
         # Add term to compensate for target acceleration
         accel_cmd = accel_cmd + state.target_accel * (params.nav_constant / 2.0)
 
-    # Endgame boost: increase agility in the final 1km
+    # Endgame boost: increase agility in terminal phase
     effective_max_accel = state.interceptor_max_accel
-    if distance < 1000.0:
-        endgame_factor = 1.0 + (1.0 - distance / 1000.0) * 0.5  # Up to 1.5× at point blank
+    if distance < 2000.0:
+        endgame_factor = 1.0 + (1.0 - distance / 2000.0) * 0.5  # Up to 1.5× at point blank
         accel_cmd = accel_cmd * endgame_factor
         effective_max_accel *= 1.5  # Allow higher G-loading in terminal phase
 
