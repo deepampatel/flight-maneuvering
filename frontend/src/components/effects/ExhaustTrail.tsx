@@ -9,9 +9,9 @@ import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-const MAX_PARTICLES = 60;
+const MAX_PARTICLES = 30;
 const PARTICLE_LIFETIME = 1.0; // seconds
-const SPAWN_RATE = 50; // particles per second
+const SPAWN_RATE = 25; // particles per second
 
 interface ExhaustTrailProps {
   position: [number, number, number];
@@ -42,8 +42,15 @@ export function ExhaustTrail({ position, velocity, color = '#ff8800', active = t
     return () => { geometry.dispose(); };
   }, [geometry]);
 
+  const frameCountRef = useRef(0);
+
   useFrame((_, delta) => {
     if (!pointsRef.current) return;
+
+    // Skip every other frame for performance
+    frameCountRef.current++;
+    if (frameCountRef.current % 2 !== 0) return;
+    delta *= 2; // compensate for skipped frame
 
     // Compute tail position (behind entity in velocity direction)
     const speed = Math.sqrt(velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2);

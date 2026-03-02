@@ -998,4 +998,5 @@ export interface ScenarioBuilderState {
   enableHmt: boolean;
   hmtAuthorityLevel: string;
   maxTime: number;
+  centerCoords?: { lat: number; lng: number };
 }

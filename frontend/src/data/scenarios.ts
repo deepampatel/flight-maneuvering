@@ -21,6 +21,8 @@ export interface NarrativeScenario {
     constraints: string[];
     threatPicture: string;
   };
+  // Geographic center for globe visualization (degrees)
+  centerCoords?: { lat: number; lng: number };
   config: {
     scenario: string;
     guidance: string;
@@ -53,6 +55,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'First Contact',
     codename: 'SILENT DAWN',
     difficulty: 'EASY',
+    centerCoords: { lat: 31.5, lng: 34.5 },
     briefing: {
       situation: 'A single unidentified aircraft has violated restricted airspace on a direct heading toward the protected zone.',
       objective: 'Intercept and neutralize the target using proportional navigation guidance.',
@@ -79,6 +82,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Evasive Action',
     codename: 'VIPER STRIKE',
     difficulty: 'MEDIUM',
+    centerCoords: { lat: 31.5, lng: 34.5 },
     briefing: {
       situation: 'Intelligence indicates the target is equipped with a missile warning receiver and will begin evasive maneuvers upon detection.',
       objective: 'Intercept a maneuvering target using augmented proportional navigation.',
@@ -106,6 +110,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Saturation Attack',
     codename: 'IRON STORM',
     difficulty: 'HARD',
+    centerCoords: { lat: 31.5, lng: 34.5 },
     briefing: {
       situation: 'Multiple hostile aircraft inbound in a coordinated saturation attack. Your interceptor force must engage all threats before they reach the defended zone.',
       objective: 'Neutralize all 4 targets using optimal weapon-target assignment.',
@@ -135,6 +140,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Cooperative Defense',
     codename: 'SHIELD WALL',
     difficulty: 'HARD',
+    centerCoords: { lat: 32.8, lng: 35.2 },
     briefing: {
       situation: 'Hostile forces are probing defenses across multiple sectors. Coordinate interceptors across engagement zones with handoff capability.',
       objective: 'Defend all sectors using cooperative engagement with zone-based defense.',
@@ -163,6 +169,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Swarm Assault',
     codename: 'DARK HORIZON',
     difficulty: 'EXTREME',
+    centerCoords: { lat: 31.5, lng: 34.5 },
     briefing: {
       situation: 'A massive coordinated swarm attack is inbound. Hostile drones in formation are executing aggressive random jinking. Deploy swarm interceptors and leverage human-machine teaming to manage the engagement.',
       objective: 'Intercept the incoming swarm using formation tactics and autonomous engagement.',
@@ -194,6 +201,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Iron Shield',
     codename: 'IRON SHIELD',
     difficulty: 'MEDIUM',
+    centerCoords: { lat: 31.3, lng: 34.3 },
     briefing: {
       situation: 'Three unguided rockets have been launched from the east. Impact Point Prediction indicates two are heading for the defended city. One will land in an open field.',
       objective: 'Engage only the threats targeting the protected area. Conserve interceptors — do not waste ammo on rockets landing in empty fields.',
@@ -223,6 +231,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Battery Defense',
     codename: 'IRON FORTRESS',
     difficulty: 'HARD',
+    centerCoords: { lat: 31.3, lng: 34.3 },
     briefing: {
       situation: 'A salvo of 5 Qassam rockets has been launched from the eastern border toward Alpha City. Your Iron Dome battery must autonomously detect, evaluate, and engage all threats heading for the defended city.',
       objective: 'Let the battery BMC autonomously engage all threats predicted to impact the defended area. Conserve ammo by ignoring rockets landing in open fields.',
@@ -255,6 +264,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Dual Battery',
     codename: 'TWIN SHIELDS',
     difficulty: 'EXTREME',
+    centerCoords: { lat: 32.8, lng: 35.2 },
     briefing: {
       situation: 'A massive Grad rocket salvo of 8 rockets targets two cities simultaneously. Two Iron Dome batteries must coordinate to defend Bravo City and Charlie City against the incoming barrage.',
       objective: 'Both batteries must autonomously engage threats targeting their respective defended cities. No rocket must reach a populated area.',
@@ -289,6 +299,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Iron Rain',
     codename: 'IRON RAIN',
     difficulty: 'HARD',
+    centerCoords: { lat: 31.3, lng: 34.3 },
     briefing: {
       situation: 'Intelligence reports a coordinated multi-wave rocket attack. Three waves of mixed Qassam and Grad rockets will arrive at staggered intervals. Some rockets may deploy decoy countermeasures.',
       objective: 'Survive the full barrage. Let the battery BMC manage engagement priorities. Classify and ignore decoys to conserve ammunition.',
@@ -325,6 +336,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Last Stand',
     codename: 'LAST STAND',
     difficulty: 'EXTREME',
+    centerCoords: { lat: 32.8, lng: 35.2 },
     briefing: {
       situation: 'Massive saturation attack with 4 continuous waves. Battery has reduced ammunition (30 interceptors total). Expect 30+ inbound rockets. This is an ammunition management scenario — every shot must count.',
       objective: 'Defend Bravo City for as long as possible. Prioritize threats by IPP — only engage rockets heading for the city. Accept that some rockets will get through when ammo runs out.',
@@ -364,6 +376,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: "David's Sling",
     codename: 'SLING SHOT',
     difficulty: 'HARD',
+    centerCoords: { lat: 31.8, lng: 34.8 },
     briefing: {
       situation: "Three subsonic cruise missiles detected heading toward Echo City. David's Sling battery is the primary defense layer for this medium-range threat.",
       objective: "Intercept all cruise missiles using Stunner interceptors. David's Sling engages threats at 40-300km range — a tier above Iron Dome.",
@@ -396,6 +409,7 @@ export const NARRATIVE_SCENARIOS: NarrativeScenario[] = [
     name: 'Aegis Total',
     codename: 'AEGIS TOTAL',
     difficulty: 'EXTREME',
+    centerCoords: { lat: 31.5, lng: 34.5 },
     briefing: {
       situation: 'Combined attack: short-range rockets, cruise missiles, and follow-on waves. All three defense tiers activated. TEWA system coordinates engagement across Iron Dome, David\'s Sling, and supporting batteries.',
       objective: 'Defend Delta City and the Air Force Base using layered defense. TEWA automatically assigns each threat to the appropriate tier. Iron Dome handles rockets, David\'s Sling handles cruise missiles.',

@@ -9,15 +9,17 @@
  * - Modals: Scenario briefing/debrief overlays
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { SimulationScene } from './components/Scene';
+import { MapView } from './components/map/MapView';
 import { ControlPanel } from './components/ControlPanel';
 import { HMTToast } from './components/HMTToast';
 import { LaunchEventToast } from './components/LaunchEventToast';
 import { MissionPlannerPanel } from './components/MissionPlannerPanel';
 import { TelemetryHUD } from './components/TelemetryHUD';
 import { CameraModeSelector } from './components/CameraController';
-import type { CameraMode } from './components/CameraController';
+import type { CameraMode, ViewMode } from './components/CameraController';
+import { ViewToggle } from './components/ViewToggle';
 import { ReplayTheater } from './components/ReplayTheater';
 import { ScenarioBriefing, ScenarioDebrief } from './components/ScenarioBriefing';
 import { SplashScreen } from './components/SplashScreen';
@@ -34,6 +36,8 @@ import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useMissionPlanner } from './components/MissionPlanner';
+import { DEFAULT_GLOBE_CONFIG } from './utils/globeCoords';
+import type { GlobeConfig } from './utils/globeCoords';
 import './App.css';
 
 type ScenarioFlow = 'idle' | 'briefing' | 'running' | 'debrief';
@@ -109,7 +113,9 @@ function App() {
   const [builderOpen, setBuilderOpen] = useState(true);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState<CameraMode>('free');
+  const [viewMode, setViewMode] = useState<ViewMode>('globe');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
   const [showRadar, setShowRadar] = useState(false);
   const [showLayers, setShowLayers] = useState(false);
 
@@ -159,6 +165,15 @@ function App() {
   // Builder state for 3D preview (batteries/areas shown before launch)
   const [builderPreview, setBuilderPreview] = useState<ScenarioBuilderState | null>(null);
 
+  // Compute globe config from active scenario or builder preview center coords
+  const globeConfig: GlobeConfig = useMemo(() => {
+    // Priority: active scenario > builder preview > default
+    const coords = activeScenario?.centerCoords
+      || builderPreview?.centerCoords
+      || { lat: DEFAULT_GLOBE_CONFIG.originLat, lng: DEFAULT_GLOBE_CONFIG.originLng };
+    return { ...DEFAULT_GLOBE_CONFIG, originLat: coords.lat, originLng: coords.lng };
+  }, [activeScenario?.centerCoords, builderPreview?.centerCoords]);
+
   // Keyboard shortcuts
   const isRunning = state?.status === 'running';
   const { showHelp, setShowHelp, shortcuts } = useKeyboardShortcuts({
@@ -168,6 +183,8 @@ function App() {
     onToggleRecording: () => isRecording ? stopRecording() : startRecording(),
     onCameraMode: (mode) => setCameraMode(mode as CameraMode),
     onToggleAdvanced: () => setShowAdvanced(prev => !prev),
+    onToggleViewMode: () => setViewMode(prev => prev === 'sim' ? 'globe' : prev === 'globe' ? 'map' : 'sim'),
+    onFocusEntity: () => setFocusRequest(prev => prev + 1),
   });
 
   // Check if simulation is running
@@ -203,6 +220,16 @@ function App() {
     setPrevInterceptCount(currentCount);
   }, [state?.intercepted_pairs?.length, audio, prevInterceptCount]);
 
+  // Auto-frame entities when simulation starts
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (isRunning && !prevRunningRef.current) {
+      // Small delay so entities have initial positions
+      setTimeout(() => setFocusRequest(prev => prev + 1), 300);
+    }
+    prevRunningRef.current = isRunning;
+  }, [isRunning]);
+
   // Scenario completion detection
   useEffect(() => {
     if (scenarioFlow !== 'running' || !activeScenario || !state) return;
@@ -227,22 +254,26 @@ function App() {
     audio.playUIClick();
 
     const config = activeScenario.config;
-    await startRun({
-      scenario: config.scenario,
-      guidance: config.guidance,
-      evasion: config.evasion,
-      navConstant: config.navConstant,
-      numInterceptors: config.numInterceptors,
-      numTargets: config.numTargets,
-      enableCooperative: config.enableCooperative,
-      enableSwarm: config.enableSwarm,
-      enableHmt: config.enableHMT,
-      windSpeed: config.windSpeed,
-      windDirection: config.windDirection,
-      enableDrag: config.enableDrag,
-    });
-
-    setScenarioFlow('running');
+    try {
+      await startRun({
+        scenario: config.scenario,
+        guidance: config.guidance,
+        evasion: config.evasion,
+        navConstant: config.navConstant,
+        numInterceptors: config.numInterceptors,
+        numTargets: config.numTargets,
+        enableCooperative: config.enableCooperative,
+        enableSwarm: config.enableSwarm,
+        enableHmt: config.enableHMT,
+        windSpeed: config.windSpeed,
+        windDirection: config.windDirection,
+        enableDrag: config.enableDrag,
+      });
+      setScenarioFlow('running');
+    } catch (err) {
+      console.error('Scenario launch failed:', err);
+      setScenarioFlow('idle');
+    }
   }, [activeScenario, startRun, audio]);
 
   // Select and open a scenario
@@ -257,43 +288,47 @@ function App() {
   const handleLaunch = async (options: Parameters<typeof startRun>[0]) => {
     audio.playLaunch();
 
-    if (missionPlanner.plannedEntities.length > 0) {
-      const regularEntities = missionPlanner.plannedEntities.filter(e => e.type !== 'launcher');
-      const launcherEntities = missionPlanner.plannedEntities.filter(e => e.type === 'launcher');
+    try {
+      if (missionPlanner.plannedEntities.length > 0) {
+        const regularEntities = missionPlanner.plannedEntities.filter(e => e.type !== 'launcher');
+        const launcherEntities = missionPlanner.plannedEntities.filter(e => e.type === 'launcher');
 
-      const customEntities = regularEntities.map(e => ({
-        id: e.id,
-        type: e.type,
-        position: e.position,
-        velocity: e.velocity,
-      }));
+        const customEntities = regularEntities.map(e => ({
+          id: e.id,
+          type: e.type,
+          position: e.position,
+          velocity: e.velocity,
+        }));
 
-      const customLaunchers = launcherEntities.map(e => ({
-        id: e.id,
-        position: e.position,
-        detection_range: e.launcherConfig?.detectionRange || 5000,
-        num_missiles: e.launcherConfig?.numMissiles || 4,
-        launch_mode: e.launcherConfig?.launchMode || 'auto',
-      }));
+        const customLaunchers = launcherEntities.map(e => ({
+          id: e.id,
+          position: e.position,
+          detection_range: e.launcherConfig?.detectionRange || 5000,
+          num_missiles: e.launcherConfig?.numMissiles || 4,
+          launch_mode: e.launcherConfig?.launchMode || 'auto',
+        }));
 
-      const customZones = missionPlanner.plannedZones.map(z => ({
-        id: z.id,
-        name: z.name,
-        center: z.center,
-        dimensions: z.dimensions,
-        color: z.color,
-      }));
+        const customZones = missionPlanner.plannedZones.map(z => ({
+          id: z.id,
+          name: z.name,
+          center: z.center,
+          dimensions: z.dimensions,
+          color: z.color,
+        }));
 
-      await startRun({
-        ...options,
-        customEntities,
-        customLaunchers: customLaunchers.length > 0 ? customLaunchers : undefined,
-        customZones: options.enableCooperative ? customZones : undefined,
-      });
+        await startRun({
+          ...options,
+          customEntities,
+          customLaunchers: customLaunchers.length > 0 ? customLaunchers : undefined,
+          customZones: options.enableCooperative ? customZones : undefined,
+        });
 
-      missionPlanner.setMode('view');
-    } else {
-      await startRun(options);
+        missionPlanner.setMode('view');
+      } else {
+        await startRun(options);
+      }
+    } catch (err) {
+      console.error('Launch failed:', err);
     }
   };
 
@@ -301,7 +336,6 @@ function App() {
   const handleBuilderLaunch = useCallback(async (builderState: ScenarioBuilderState, presetScenario: string | null) => {
     audio.playLaunch();
 
-    // Always send explicit arrays — "what you see in the builder = what runs"
     const customBatteries = builderState.batteries.map(b => ({
       id: b.id,
       name: b.name,
@@ -340,30 +374,34 @@ function App() {
       priority: a.priority,
     }));
 
-    await startRun({
-      scenario: presetScenario || 'head_on',
-      guidance: builderState.guidance,
-      navConstant: builderState.navConstant,
-      evasion: builderState.evasion,
-      numInterceptors: builderState.numInterceptors,
-      numTargets: builderState.numTargets,
-      wtaAlgorithm: builderState.wtaAlgorithm,
-      killRadius: builderState.killRadius,
-      windSpeed: builderState.windSpeed,
-      windDirection: builderState.windDirection,
-      windGusts: builderState.windGusts,
-      enableDrag: builderState.enableDrag,
-      enableTerrain: builderState.enableTerrain,
-      enableDatalink: builderState.enableDatalink,
-      enableCooperative: builderState.enableCooperative,
-      enableSwarm: builderState.enableSwarm,
-      enableHmt: builderState.enableHmt,
-      hmtAuthorityLevel: builderState.hmtAuthorityLevel as 'full_auto' | 'human_on_loop' | 'human_in_loop' | 'manual',
-      maxTime: builderState.maxTime,
-      customBatteries,
-      customWaves,
-      customProtectedAreas,
-    });
+    try {
+      await startRun({
+        scenario: presetScenario || 'head_on',
+        guidance: builderState.guidance,
+        navConstant: builderState.navConstant,
+        evasion: builderState.evasion,
+        numInterceptors: builderState.numInterceptors,
+        numTargets: builderState.numTargets,
+        wtaAlgorithm: builderState.wtaAlgorithm,
+        killRadius: builderState.killRadius,
+        windSpeed: builderState.windSpeed,
+        windDirection: builderState.windDirection,
+        windGusts: builderState.windGusts,
+        enableDrag: builderState.enableDrag,
+        enableTerrain: builderState.enableTerrain,
+        enableDatalink: builderState.enableDatalink,
+        enableCooperative: builderState.enableCooperative,
+        enableSwarm: builderState.enableSwarm,
+        enableHmt: builderState.enableHmt,
+        hmtAuthorityLevel: builderState.hmtAuthorityLevel as 'full_auto' | 'human_on_loop' | 'human_in_loop' | 'manual',
+        maxTime: builderState.maxTime,
+        customBatteries,
+        customWaves,
+        customProtectedAreas,
+      });
+    } catch (err) {
+      console.error('Builder launch failed:', err);
+    }
   }, [startRun, audio]);
 
   // Replay theater handlers
@@ -600,34 +638,57 @@ function App() {
 
       <main className="app-main">
         <div className={`scene-container ${!isRunning && !isReplayActive && plannerOpen ? 'with-planner' : ''}`}>
-          <SimulationScene
-            state={state}
-            interceptGeometry={interceptGeometry}
-            assignments={assignments}
-            sensorTracks={sensorTracks}
-            cooperativeState={cooperativeState}
-            launchers={launchers}
-            // Camera & selection
-            cameraMode={cameraMode}
-            selectedEntityId={activeSelectedId}
-            onSelectEntity={activeSelectEntity}
-            replayProgress={autoCameraEnabled ? replayProgress : undefined}
-            // Mission Planner
-            plannerMode={missionPlanner.mode}
-            plannedEntities={missionPlanner.plannedEntities}
-            plannedZones={missionPlanner.plannedZones}
-            onAddEntity={missionPlanner.addEntity}
-            onUpdateEntity={missionPlanner.updateEntity}
-            onRemoveEntity={missionPlanner.removeEntity}
-            onAddZone={missionPlanner.addZone}
-            onUpdateZone={missionPlanner.updateZone}
-            onRemoveZone={missionPlanner.removeZone}
-            showGrid={missionPlanner.showGrid}
-            snapToGrid={missionPlanner.snapToGrid}
-            onScenePlacement={handleScenePlacement}
-            previewBatteries={!isRunning ? builderPreview?.batteries : undefined}
-            previewProtectedAreas={!isRunning ? builderPreview?.protectedAreas : undefined}
-          />
+          {/* Three.js Canvas — shown in SIM and GLOBE modes, hidden in MAP mode */}
+          <div style={{
+            display: viewMode !== 'map' ? 'block' : 'none',
+            width: '100%',
+            height: '100%',
+          }}>
+            <SimulationScene
+              state={state}
+              interceptGeometry={interceptGeometry}
+              assignments={assignments}
+              sensorTracks={sensorTracks}
+              cooperativeState={cooperativeState}
+              launchers={launchers}
+              globeConfig={globeConfig}
+              // Camera & selection
+              cameraMode={cameraMode}
+              viewMode={viewMode}
+              selectedEntityId={activeSelectedId}
+              onSelectEntity={activeSelectEntity}
+              replayProgress={autoCameraEnabled ? replayProgress : undefined}
+              focusRequest={focusRequest}
+              // Mission Planner
+              plannerMode={missionPlanner.mode}
+              plannedEntities={missionPlanner.plannedEntities}
+              plannedZones={missionPlanner.plannedZones}
+              onAddEntity={missionPlanner.addEntity}
+              onUpdateEntity={missionPlanner.updateEntity}
+              onRemoveEntity={missionPlanner.removeEntity}
+              onAddZone={missionPlanner.addZone}
+              onUpdateZone={missionPlanner.updateZone}
+              onRemoveZone={missionPlanner.removeZone}
+              showGrid={missionPlanner.showGrid}
+              snapToGrid={missionPlanner.snapToGrid}
+              onScenePlacement={handleScenePlacement}
+              previewBatteries={!isRunning ? builderPreview?.batteries : undefined}
+              previewProtectedAreas={!isRunning ? builderPreview?.protectedAreas : undefined}
+            />
+          </div>
+
+          {/* Google Maps 2D — mounted only in map mode */}
+          {viewMode === 'map' && (
+            <MapView
+              state={state}
+              interceptGeometry={interceptGeometry}
+              globeConfig={globeConfig}
+              selectedEntityId={activeSelectedId}
+              onSelectEntity={activeSelectEntity}
+              previewBatteries={!isRunning ? builderPreview?.batteries : undefined}
+              previewProtectedAreas={!isRunning ? builderPreview?.protectedAreas : undefined}
+            />
+          )}
 
           {/* Telemetry HUD overlay on scene */}
           <TelemetryHUD
@@ -662,8 +723,11 @@ function App() {
             </div>
           )}
 
-          {/* Camera mode selector */}
-          {!isReplayActive && (
+          {/* View toggle (Globe / Map) */}
+          <ViewToggle viewMode={viewMode} onSetViewMode={setViewMode} />
+
+          {/* Camera mode selector — hidden in map mode and during replay */}
+          {!isReplayActive && viewMode !== 'map' && (
             <CameraModeSelector
               mode={cameraMode}
               onSetMode={setCameraMode}

@@ -1364,6 +1364,46 @@ body {
   border-color: rgba(234, 179, 8, 0.2);
 }
 
+/* ==================== VIEW TOGGLE (Globe / Map) ==================== */
+.view-toggle {
+  position: absolute;
+  bottom: 5.5rem;
+  right: 0.75rem;
+  display: flex;
+  gap: 2px;
+  z-index: 10;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  border-radius: 3px;
+  padding: 2px;
+  backdrop-filter: blur(12px);
+}
+
+.view-toggle-btn {
+  padding: 0.3rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.view-toggle-btn.active {
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
 /* ==================== MISSION PLANNER TOOLBAR ==================== */
 .planner-toolbar {
   position: fixed;
@@ -4431,4 +4471,161 @@ input:focus-visible {
 .scenario-builder.running .builder-scroll {
   opacity: 0.6;
   pointer-events: none;
+}
+
+/* ==================== GOOGLE MAPS 2D VIEW ==================== */
+
+/* Container fills the scene area */
+.map-view-container {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Entity arrow markers */
+.map-marker {
+  cursor: pointer;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+  transition: transform 0.1s ease;
+}
+.map-marker:hover {
+  transform: scale(1.15);
+}
+.map-marker.selected svg {
+  stroke: #f59e0b;
+  stroke-width: 2;
+}
+.map-marker.selected {
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.7));
+}
+.map-marker-label {
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: #d4d4d8;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+/* Battery hexagonal badge markers */
+.map-battery-marker {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  position: relative;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+  transition: transform 0.15s ease;
+}
+.map-battery-marker:hover {
+  transform: scale(1.1);
+}
+.map-battery-marker.selected {
+  filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.8));
+}
+.map-battery-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.map-battery-tier {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.map-battery-ammo {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1;
+}
+.map-battery-label {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: #a1a1aa;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+/* Launcher square badge markers */
+.map-launcher-marker {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: rgba(34, 197, 94, 0.2);
+  border: 1.5px solid #22c55e;
+  border-radius: 3px;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+  transition: transform 0.15s ease;
+}
+.map-launcher-marker:hover {
+  transform: scale(1.1);
+}
+.map-launcher-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #22c55e;
+}
+
+/* No-API-key fallback */
+.map-no-key {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+}
+.map-no-key-content {
+  text-align: center;
+  max-width: 340px;
+  padding: 32px;
+}
+.map-no-key-icon {
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.map-no-key-title {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+.map-no-key-text {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+.map-no-key-text code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-elevated);
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--accent);
 }

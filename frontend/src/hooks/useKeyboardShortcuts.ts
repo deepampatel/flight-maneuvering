@@ -21,6 +21,8 @@ export const SHORTCUTS: ShortcutDef[] = [
   { key: '2', label: '2', description: 'Chase camera' },
   { key: '3', label: '3', description: 'Tactical (top-down) camera' },
   { key: '4', label: '4', description: 'Cinematic camera' },
+  { key: 'm', label: 'M', description: 'Cycle view: SIM → Globe → Map' },
+  { key: 'f', label: 'F', description: 'Focus selected entity (or all)' },
   { key: 'a', label: 'A', description: 'Toggle advanced panel' },
   { key: '?', label: '?', description: 'Show keyboard shortcuts' },
 ];
@@ -31,6 +33,8 @@ interface ShortcutActions {
   onToggleRecording?: () => void;
   onCameraMode?: (mode: string) => void;
   onToggleAdvanced?: () => void;
+  onToggleViewMode?: () => void;
+  onFocusEntity?: () => void;
   isRunning?: boolean;
 }
 
@@ -73,6 +77,14 @@ export function useKeyboardShortcuts(actions: ShortcutActions) {
         break;
       case '4':
         actions.onCameraMode?.('cinematic');
+        break;
+      case 'm':
+      case 'M':
+        actions.onToggleViewMode?.();
+        break;
+      case 'f':
+      case 'F':
+        actions.onFocusEntity?.();
         break;
       case 'a':
       case 'A':
