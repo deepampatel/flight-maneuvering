@@ -37,7 +37,7 @@ from .assignment import (
 from .environment import EnvironmentModel, EnvironmentConfig
 from .cooperation import CooperativeEngagementManager, HandoffReason
 from .ipp import ProtectedArea, ImpactPrediction, predict_impact_point, check_threat_to_areas
-from .battery import Battery, BatteryConfig, create_iron_dome_battery
+from .battery import Battery, BatteryConfig, EngagementStatus, create_iron_dome_battery
 from .waves import WaveManager, ThreatWave
 from .decoy import deploy_decoys, classify_threat, DecoyConfig
 from .tewa import TEWAController, DefenseTier
@@ -106,7 +106,7 @@ class SimConfig:
     dt: float = 0.02            # Timestep (50 Hz)
     max_time: float = 60.0      # Max sim duration (seconds)
     kill_radius: float = 150.0  # Intercept success radius (meters) - proximity fuse
-    lethal_radius: float = 100.0 # Warhead blast/fragmentation radius for Pk model
+    lethal_radius: float = 140.0 # Warhead blast/fragmentation radius for Pk model
     real_time: bool = True      # Try to match wall-clock time
 
     # Environmental effects
@@ -323,16 +323,20 @@ class SimState:
                 for area in self.protected_areas
             ]
 
-        # Include impact predictions
+        # Include impact predictions (sanitize inf/NaN for JSON)
+        def _safe_float(v: float) -> float:
+            import math
+            return -1.0 if (math.isinf(v) or math.isnan(v)) else v
+
         if self.impact_predictions:
             event["impact_predictions"] = {
                 tid: {
                     "threat_id": pred.threat_id,
                     "impact_point": pred.impact_point.to_dict(),
-                    "time_to_impact": pred.time_to_impact,
+                    "time_to_impact": _safe_float(pred.time_to_impact),
                     "threatens_area": pred.threatens_area,
                     "area_name": pred.area_name,
-                    "distance_to_area": pred.distance_to_area,
+                    "distance_to_area": _safe_float(pred.distance_to_area),
                     "confidence": pred.confidence,
                     "engage": pred.engage,
                 }
@@ -817,6 +821,8 @@ class SimEngine:
         new_intercepts = []
         expended_interceptors = set()
         for interceptor in active_interceptors:
+            if interceptor.id in expended_interceptors:
+                continue  # Already expended this tick
             for target in active_targets:
                 # CPA calculation: find minimum distance during this tick
                 # Relative position and velocity
@@ -835,14 +841,17 @@ class SimEngine:
 
                 if cpa_dist <= self.config.kill_radius:
                     pk = compute_pk(cpa_dist, self.config.lethal_radius)
-                    if _random.random() < pk:
+                    roll = _random.random()
+                    if roll < pk:
                         new_intercepts.append((interceptor.id, target.id))
                         if self.state.intercepting_id is None:
                             self.state.intercepting_id = interceptor.id
                             self.state.intercepted_target_id = target.id
+                        break  # This interceptor detonated — stop checking other targets
                     else:
                         # Near miss — interceptor expended but target survives
                         expended_interceptors.add(interceptor.id)
+                        break  # Interceptor expended — stop checking other targets
 
         # Add new intercepts to the list
         for pair in new_intercepts:
@@ -910,6 +919,35 @@ class SimEngine:
             if all_missed:
                 self.state.status = SimStatus.COMPLETED
                 self.state.result = EngagementResult.MISSED
+
+    def _sync_battery_intercepts(self) -> None:
+        """Notify batteries of engine-detected intercepts and expended interceptors.
+
+        After _check_end_conditions detects CPA intercepts and removes near-miss
+        interceptors, batteries still hold stale track data.  This method:
+        1. Marks battery tracks INTERCEPTED for killed targets.
+        2. Removes intercepted/expended interceptors from battery active lists.
+        """
+        if not self.batteries:
+            return
+
+        intercepted_target_ids = set(pair[1] for pair in self.state.intercepted_pairs)
+        intercepted_interceptor_ids = set(pair[0] for pair in self.state.intercepted_pairs)
+        # IDs still in the sim list (intercepted stay with zero vel, expended are removed)
+        live_interceptor_ids = set(i.id for i in self.state.interceptors)
+
+        for battery in self.batteries:
+            # Mark intercepted targets in battery tracks
+            for threat_id, track in battery.tracked_threats.items():
+                if threat_id in intercepted_target_ids:
+                    if track.engagement_status != EngagementStatus.INTERCEPTED:
+                        track.engagement_status = EngagementStatus.INTERCEPTED
+
+            # Prune interceptors that are intercepted or expended (near-miss)
+            battery.active_interceptors = [
+                iid for iid in battery.active_interceptors
+                if iid not in intercepted_interceptor_ids and iid in live_interceptor_ids
+            ]
 
     async def tick(self) -> None:
         """
@@ -1315,6 +1353,9 @@ class SimEngine:
         # 13. Check end conditions
         self._check_end_conditions()
 
+        # 13.5. Sync battery tracks with intercept/expended results
+        self._sync_battery_intercepts()
+
         # 14. Emit state event (include WTA assignments)
         await self._emit_event(self.state.to_event(self.assignments))
 
@@ -1356,14 +1397,11 @@ class SimEngine:
         except asyncio.CancelledError:
             # Handle graceful cancellation (e.g., user clicked ABORT)
             self.state.status = SimStatus.COMPLETED
-            self.state.result = EngagementResult.TIMEOUT  # Mark as stopped/timeout
+            self.state.result = EngagementResult.TIMEOUT
 
             # Shield emit operations from cancellation so UI gets the update
             try:
-                # Emit final state so UI updates immediately
                 await asyncio.shield(self._emit_event(self.state.to_event(self.assignments)))
-
-                # Emit stopped event so UI knows simulation ended
                 final_miss = self.state.miss_distance if self.state.miss_distance != float('inf') else -1
                 await asyncio.shield(self._emit_event({
                     "type": "complete",
@@ -1375,9 +1413,13 @@ class SimEngine:
                     "ticks": self.state.tick,
                 }))
             except asyncio.CancelledError:
-                pass  # Ignore if shield still gets cancelled
+                pass
 
             raise  # Re-raise so the caller knows it was cancelled
+
+        except Exception:
+            self.state.status = SimStatus.COMPLETED
+            self.state.result = EngagementResult.TIMEOUT
 
         # Emit final event
         final_miss = self.state.miss_distance if self.state.miss_distance != float('inf') else -1

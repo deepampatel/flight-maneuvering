@@ -320,10 +320,11 @@ class Battery:
                 continue
 
             # Skip if already assigned an interceptor that's still flying
-            if track.assigned_interceptor and track.assigned_interceptor in [
-                iid for iid in self.active_interceptors
-            ]:
-                continue
+            if track.assigned_interceptor:
+                if track.assigned_interceptor in self.active_interceptors:
+                    continue
+                # Interceptor no longer active (intercepted or expended) — clear stale assignment
+                track.assigned_interceptor = None
 
             # Require firm track (enough detections to confirm)
             if not track.is_firm_track:

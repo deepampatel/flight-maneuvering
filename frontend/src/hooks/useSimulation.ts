@@ -317,6 +317,7 @@ export function useSimulation(): UseSimulationReturn {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
+  const reconnectAttemptsRef = useRef(0);
 
   // Fetch available scenarios, guidance laws, and evasion types on mount
   useEffect(() => {
@@ -369,6 +370,7 @@ export function useSimulation(): UseSimulationReturn {
     ws.onopen = () => {
       console.log('WebSocket connected');
       setConnected(true);
+      reconnectAttemptsRef.current = 0; // Reset backoff on successful connect
     };
 
     ws.onmessage = (event) => {
@@ -409,11 +411,13 @@ export function useSimulation(): UseSimulationReturn {
       setConnected(false);
       wsRef.current = null;
 
-      // Auto-reconnect after 2 seconds
+      // Exponential backoff: 1s, 2s, 4s, 8s, capped at 10s
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+      reconnectAttemptsRef.current += 1;
       reconnectTimeoutRef.current = window.setTimeout(() => {
-        console.log('Attempting reconnect...');
+        console.log(`Reconnecting (attempt ${reconnectAttemptsRef.current})...`);
         connect();
-      }, 2000);
+      }, delay);
     };
 
     ws.onerror = (error) => {
@@ -445,60 +449,70 @@ export function useSimulation(): UseSimulationReturn {
     setAssignments(null);
     setCostMatrix(null);
 
-    const response = await fetch(`${API_URL}/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scenario: options.scenario,
-        guidance: options.guidance,
-        nav_constant: options.navConstant,
-        evasion: options.evasion || 'none',
-        num_interceptors: options.numInterceptors || 1,
-        num_targets: options.numTargets,  // Multi-target
-        wta_algorithm: options.wtaAlgorithm || 'hungarian',  // WTA algorithm
-        real_time: true,
-        // Environment
-        wind_speed: options.windSpeed || 0,
-        wind_direction: options.windDirection || 0,
-        wind_gusts: options.windGusts || 0,
-        enable_drag: options.enableDrag || false,
-        // Cooperative
-        enable_cooperative: options.enableCooperative || false,
-        // Mission Planner: Custom entities
-        custom_entities: options.customEntities,
-        custom_zones: options.customZones,
-        custom_launchers: options.customLaunchers,
-        // Swarm
-        enable_swarm: options.enableSwarm || false,
-        swarm_formation: options.swarmFormation,
-        swarm_spacing: options.swarmSpacing,
-        // HMT
-        enable_hmt: options.enableHmt || false,
-        hmt_authority_level: options.hmtAuthorityLevel,
-        // Datalink
-        enable_datalink: options.enableDatalink || false,
-        // Terrain
-        enable_terrain: options.enableTerrain || false,
-        // Scenario Builder: Custom batteries, waves, protected areas
-        custom_batteries: options.customBatteries,
-        custom_waves: options.customWaves,
-        custom_protected_areas: options.customProtectedAreas,
-        kill_radius: options.killRadius,
-        max_time: options.maxTime,
-      }),
-    });
+    try {
+      const response = await fetch(`${API_URL}/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenario: options.scenario,
+          guidance: options.guidance,
+          nav_constant: options.navConstant,
+          evasion: options.evasion || 'none',
+          num_interceptors: options.numInterceptors || 1,
+          num_targets: options.numTargets,  // Multi-target
+          wta_algorithm: options.wtaAlgorithm || 'hungarian',  // WTA algorithm
+          real_time: true,
+          // Environment
+          wind_speed: options.windSpeed || 0,
+          wind_direction: options.windDirection || 0,
+          wind_gusts: options.windGusts || 0,
+          enable_drag: options.enableDrag || false,
+          // Cooperative
+          enable_cooperative: options.enableCooperative || false,
+          // Mission Planner: Custom entities
+          custom_entities: options.customEntities,
+          custom_zones: options.customZones,
+          custom_launchers: options.customLaunchers,
+          // Swarm
+          enable_swarm: options.enableSwarm || false,
+          swarm_formation: options.swarmFormation,
+          swarm_spacing: options.swarmSpacing,
+          // HMT
+          enable_hmt: options.enableHmt || false,
+          hmt_authority_level: options.hmtAuthorityLevel,
+          // Datalink
+          enable_datalink: options.enableDatalink || false,
+          // Terrain
+          enable_terrain: options.enableTerrain || false,
+          // Scenario Builder: Custom batteries, waves, protected areas
+          custom_batteries: options.customBatteries,
+          custom_waves: options.customWaves,
+          custom_protected_areas: options.customProtectedAreas,
+          kill_radius: options.killRadius,
+          max_time: options.maxTime,
+        }),
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to start run: ${response.statusText}`);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`Failed to start run: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('Run started:', data);
+    } catch (err) {
+      console.error('startRun failed:', err);
+      throw err; // Re-throw so callers can handle
     }
-
-    const data = await response.json();
-    console.log('Run started:', data);
   }, []);
 
   // Stop current run
   const stopRun = useCallback(async () => {
-    await fetch(`${API_URL}/runs/stop`, { method: 'POST' });
+    try {
+      await fetch(`${API_URL}/runs/stop`, { method: 'POST' });
+    } catch (err) {
+      console.error('stopRun failed:', err);
+    }
   }, []);
 
   // Run Monte Carlo analysis

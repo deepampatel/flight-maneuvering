@@ -12,6 +12,11 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --production=false
 COPY frontend/ ./
+
+# Google Maps API key (optional — injected at build time for Vite)
+ARG VITE_GOOGLE_MAPS_API_KEY=""
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+
 RUN npm run build
 
 # --- Stage 2: Python Backend ---
@@ -47,4 +52,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 
 # Run
 ENV PYTHONPATH=/app:/app/backend
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "uvicorn", "backend.server:app", "--host", "0.0.0.0", "--port", "8000"]

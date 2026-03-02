@@ -15,6 +15,7 @@ that would allow separation later.
 from __future__ import annotations
 import asyncio
 import json
+import math
 import time
 from contextlib import asynccontextmanager
 from typing import Set, Optional
@@ -84,12 +85,23 @@ class ConnectionManager:
         self.active_connections.discard(websocket)
         print(f"Client disconnected. Total: {len(self.active_connections)}")
 
+    @staticmethod
+    def _sanitize(obj):
+        """Recursively replace inf/NaN floats with None for JSON compliance."""
+        if isinstance(obj, dict):
+            return {k: ConnectionManager._sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [ConnectionManager._sanitize(v) for v in obj]
+        if isinstance(obj, float) and (math.isinf(obj) or math.isnan(obj)):
+            return None
+        return obj
+
     async def broadcast(self, message: dict):
         """Send to all connected clients."""
         if not self.active_connections:
             return
 
-        data = json.dumps(message)
+        data = json.dumps(ConnectionManager._sanitize(message))
         # Send to all, handle disconnects
         disconnected = []
         for connection in self.active_connections:
@@ -792,14 +804,31 @@ async def start_run(config: RunConfig):
         custom_wave_list = []
         for i, wc in enumerate(config.custom_waves):
             bearing_rad = math.radians(wc.spawn_bearing)
-            spawn_x = wc.spawn_range * math.sin(bearing_rad)
-            spawn_y = wc.spawn_range * math.cos(bearing_rad)
-            # Velocity points toward origin (the defended area)
             speed = {"qassam": 200.0, "grad": 300.0, "cruise_missile": 250.0}.get(wc.threat_type, 200.0)
-            dist = math.sqrt(spawn_x**2 + spawn_y**2) or 1.0
-            vx = -speed * spawn_x / dist
-            vy = -speed * spawn_y / dist
-            vz = -speed * 0.3  # descending
+            spawn_alt = max(wc.spawn_altitude, 100.0)
+            g = 9.81
+
+            # Compute max feasible range for a descending ballistic trajectory
+            # (threat spawns at apogee-like point and falls under gravity)
+            t_fall = math.sqrt(2 * spawn_alt / g)
+            max_range = speed * t_fall * 0.85  # 85% margin for drag
+
+            effective_range = min(wc.spawn_range, max_range)
+            spawn_x = effective_range * math.sin(bearing_rad)
+            spawn_y = effective_range * math.cos(bearing_rad)
+            horiz_dist = math.sqrt(spawn_x**2 + spawn_y**2) or 1.0
+
+            # Compute vz so threat impacts at origin accounting for gravity
+            # z(t) = alt + vz*t - 0.5*g*t^2 = 0  at  t = horiz_dist / speed
+            t_flight = horiz_dist / speed
+            if t_flight > 0.1:
+                vz = (0.5 * g * t_flight**2 - spawn_alt) / t_flight
+            else:
+                vz = -speed * 0.3
+
+            # Horizontal velocity toward origin
+            vx = -speed * spawn_x / horiz_dist
+            vy = -speed * spawn_y / horiz_dist
             custom_wave_list.append(ThreatWave(
                 wave_id=i + 1,
                 spawn_time=wc.delay,
@@ -813,6 +842,32 @@ async def start_run(config: RunConfig):
         current_engine.wave_configs = custom_wave_list
         if any(wc.decoy_fraction > 0 for wc in config.custom_waves):
             current_engine.enable_decoys = True
+
+    # Re-initialize batteries/waves/areas from updated configs
+    # (custom configs are set AFTER setup_scenario, so we rebuild here)
+    if config.custom_batteries is not None or config.custom_waves is not None or config.custom_protected_areas is not None:
+        from sim.battery import Battery as BatteryObj
+        from sim.waves import WaveManager
+        from sim.tewa import TEWAController as TEWACtrl
+
+        # Rebuild batteries from configs
+        current_engine.batteries = []
+        for i, bconfig in enumerate(current_engine.battery_configs):
+            battery = BatteryObj(f"BAT_{i+1}", bconfig)
+            current_engine.batteries.append(battery)
+        current_engine.state.batteries = current_engine.batteries
+        current_engine.state.protected_areas = current_engine.protected_areas
+
+        # Rebuild TEWA if batteries exist
+        if current_engine.batteries:
+            current_engine.tewa = TEWACtrl()
+            for battery in current_engine.batteries:
+                current_engine.tewa.register_battery(battery)
+            current_engine.state.tewa = current_engine.tewa
+
+        # Rebuild wave manager from configs
+        if current_engine.wave_configs:
+            current_engine.wave_manager = WaveManager(current_engine.wave_configs)
 
     # Start simulation in background
     run_task = asyncio.create_task(current_engine.run())
@@ -833,13 +888,16 @@ async def get_current_run():
         return {"status": "no_run"}
 
     state = current_engine.state
+    miss_dist = state.miss_distance
+    if math.isinf(miss_dist) or math.isnan(miss_dist):
+        miss_dist = -1
     return {
         "run_id": state.run_id,
         "status": state.status.value,
         "sim_time": state.sim_time,
         "tick": state.tick,
         "result": state.result.value,
-        "miss_distance": state.miss_distance,
+        "miss_distance": miss_dist,
     }
 
 
